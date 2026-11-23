@@ -5,7 +5,7 @@ letters above their heads while running, jumping and dashing around a neon
 cyberpunk grid. Built as a fully static site: **no backend, no accounts, no
 API keys** — deployed on GitHub Pages with serverless P2P co-op.
 
-**Play:** `https://jaime4266.github.io/cyber-arena-3d/`
+**Play:** `https://jaime-sinclair.github.io/cyber-arena-3d/`
 
 ---
 
