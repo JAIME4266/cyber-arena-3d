@@ -14,7 +14,8 @@ import type { EnemyKind, InputState, SimEvent, ViewModel } from '../core/types'
 import { emptyInput } from '../core/types'
 import type { GameRenderer } from '../render/renderer'
 import { World } from '../render/world'
-import { Actor, ENEMY_PALETTES, PLAYER2_PALETTE, PLAYER_PALETTE } from '../render/actor'
+import { createActor, createPlayerActor } from '../render/actorfactory'
+import type { ActorView } from '../render/actor'
 import { LabelSystem } from '../render/labels'
 import { VFX } from '../render/vfx'
 import { Hud } from '../render/hud'
@@ -41,7 +42,7 @@ export interface SessionConfig {
 
 interface EnemyView {
   holder: THREE.Group
-  actor: Actor
+  actor: ActorView
   kind: EnemyKind
 }
 
@@ -52,7 +53,7 @@ export class Session {
   private readonly cfg: SessionConfig
   private readonly world: World
   private readonly vfx: VFX
-  private readonly labels = new LabelSystem()
+  private readonly labels: LabelSystem
   private readonly hud: Hud
   private readonly screens: OverlayScreens
 
@@ -60,7 +61,7 @@ export class Session {
   private readonly host: NetHost | null
   private readonly client: NetClient | null
 
-  private readonly playerActors: Actor[] = []
+  private readonly playerActors: ActorView[] = []
   private readonly playerHolders: THREE.Group[] = []
   private readonly enemies = new Map<number, EnemyView>()
   private readonly dying: { view: EnemyView; t: number }[] = []
@@ -101,6 +102,7 @@ export class Session {
 
     cfg.renderer.scene.clear()
     this.world = new World(cfg.renderer.scene)
+    this.labels = new LabelSystem(cfg.renderer.scene)
     this.vfx = new VFX(cfg.renderer.scene, {
       fxLayer: cfg.fxLayer,
       speedlinesEl: cfg.speedlinesEl,
@@ -114,7 +116,7 @@ export class Session {
     const playerCount = this.host || this.client ? 2 : 1
     for (let i = 0; i < playerCount; i++) {
       const holder = new THREE.Group()
-      const actor = new Actor(i === this.localId ? PLAYER_PALETTE : PLAYER2_PALETTE)
+      const actor = createPlayerActor(i === this.localId)
       holder.add(actor.root)
       cfg.renderer.scene.add(holder)
       this.playerHolders.push(holder)
@@ -545,7 +547,7 @@ export class Session {
       let view = this.enemies.get(e.id)
       if (!view) {
         const holder = new THREE.Group()
-        const actor = new Actor(ENEMY_PALETTES[e.kind])
+        const actor = createActor(e.kind)
         holder.add(actor.root)
         this.renderer().scene.add(holder)
         view = { holder, actor, kind: e.kind }

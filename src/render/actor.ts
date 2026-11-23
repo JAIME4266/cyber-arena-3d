@@ -156,7 +156,22 @@ export interface ActorAnimState {
   air: boolean
 }
 
-export class Actor {
+/**
+ * The actor contract every renderer satisfies — procedural (this file) and
+ * HD GLB actors (glbactor.ts) are interchangeable at runtime.
+ */
+export interface ActorView {
+  readonly root: THREE.Object3D
+  dead: boolean
+  update(dt: number, st: ActorAnimState): void
+  hit(): void
+  shoot(): void
+  die(): void
+  reset(): void
+  muzzle(out?: THREE.Vector3): THREE.Vector3
+}
+
+export class Actor implements ActorView {
   readonly root = new THREE.Group()
   private readonly j: Record<string, THREE.Object3D> = {}
   private readonly bones: THREE.Bone[] = []

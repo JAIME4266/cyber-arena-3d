@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sfxVolume: 0.8,
   shake: true,
   speedlines: true,
+  hd: true,
   name: '',
 }
 

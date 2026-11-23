@@ -10,7 +10,9 @@ const CACHE_MAX = 96
 
 export class LabelSystem {
   private readonly cache = new Map<string, THREE.CanvasTexture>()
-  private readonly labels = new Map<number, { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; key: string }>()
+  private readonly labels = new Map<number, { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; key: string }>
+
+  constructor(private readonly scene: THREE.Scene) {}
 
   private texture(seq: string, ti: number, locked: boolean): THREE.CanvasTexture {
     const key = `${seq}|${ti}|${locked ? 1 : 0}`
@@ -58,7 +60,7 @@ export class LabelSystem {
     return tex
   }
 
-  /** Ensure a label exists for an enemy; returns its mesh. */
+  /** Ensure a label exists for an enemy (attached to the scene); returns its mesh. */
   ensure(id: number, kind: EnemyKind): THREE.Mesh {
     let entry = this.labels.get(id)
     if (!entry) {
@@ -74,6 +76,7 @@ export class LabelSystem {
       mesh.scale.setScalar(kind === 'BOSS' ? 2.2 : 1.3)
       entry = { mesh, mat, key: '' }
       this.labels.set(id, entry)
+      this.scene.add(mesh)
     }
     return entry.mesh
   }

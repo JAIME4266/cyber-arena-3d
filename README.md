@@ -49,8 +49,14 @@ src/
   render/   three.js presentation
     renderer.ts   sRGB + ACES + bloom pipeline, SwiftShader-safe quality
     world.ts      Arena, GLSL energy barrier, merged-geometry city (~3 draws)
+    assets.ts     HD asset library: meshopt GLB pack, byte progress,
+                  per-file fallback, onReady hot-swap hooks
     actor.ts      Procedural 11-bone rigged characters w/ hand-written skin
-                  weights — always animated, zero asset downloads
+                  weights — the always-available fallback actor
+    glbactor.ts   HD actors: Mixamo rigs driven by a procedural animation
+                  layer (walk/aim/recoil/flinch/death + spring cloth/rope
+                  physics) and data-driven auto-fitted weapons
+    actorfactory.ts  HD when available + enabled, procedural otherwise
     labels.ts     Letter labels with LRU texture cache
     vfx.ts        Spark/ring pools, tracer beam, camera juice
     audio.ts      WebAudio SFX + layered procedural soundtrack (intensity
@@ -74,26 +80,46 @@ audio. If both peers sit behind stubborn NATs, WebRTC may fail to connect —
 that's the tradeoff of zero-infrastructure co-op; trying a different network
 (hotspot) resolves it.
 
-### Why procedural actors instead of the .glb models?
+### HD models: the artist assets, alive
 
-The original build shipped 65 MB of skinned models that contained **zero
-animation clips** — everything T-posed and bobbed. The elite build defaults to
-the procedural rig: fully animated, cohesive, and the entire game loads in
-under 1 MB. The models remain in `assets/models/` for a future "HD" path:
-add Mixamo clips (idle/walk/shoot/hit/die) to them, and the clip-matching
-loader described in `legacy/index.html` can be revived on top of the new
-engine.
+The original build shipped 74 MB of skinned models with **zero animation
+clips** — everything T-posed and bobbed. The elite build now ships them as a
+**3.6 MB meshopt-compressed pack** (`public/models/`, built by
+`bun run assets:optimize` from `assets/models/`) and brings them to life with
+a **procedural animation layer** instead of clips:
+
+- **Universal Mixamo rig driver** — bone rest poses are snapshotted, swings
+  are applied on precomputed parent-space axes, so one animator drives the
+  vampire player, both enemy species and the boss.
+- **Locomotion & combat** — walk/run cycles with knee bend and counter-rotated
+  spine, aim poses blended per frame, recoil, hit flinches, backward deaths,
+  breathing idles, air poses.
+- **Secondary motion** — cloth, skirt, rope, chain and armour bones run
+  critically-damped springs driven by velocity, so capes and chains trail
+  and settle as characters move.
+- **Auto-fitted weapons** — each gun's long axis, muzzle end (thin end) and
+  grip (thickest cross-section) are measured from the geometry, then the
+  weapon is mounted on the right hand and locked while the arm holds the
+  aim pose — so barrels point exactly down the line of fire, and hang
+  naturally at rest.
+- **Resilience** — any file that fails to load falls back to the procedural
+  actor for that role; software renderers (CI, weak iGPUs) automatically run
+  the procedural path for speed (`?hd=1` forces HD for testing).
+
+The pack streams in the background (progress shown on the menu); runs started
+mid-download show a brief loading gate. HD MODELS can be toggled in SETTINGS.
 
 ## Development
 
 ```bash
 bun install
-bun run dev        # vite dev server
-bun run typecheck  # tsc --noEmit (strict)
-bun run lint       # eslint
-bun run test       # vitest — 24 unit tests over the deterministic core
-bun run build      # vite build → dist/
-bun run e2e        # playwright smoke tests (headless Chromium + SwiftShader)
+bun run dev             # vite dev server
+bun run typecheck       # tsc --noEmit (strict)
+bun run lint            # eslint
+bun run test            # vitest — 24 unit tests over the deterministic core
+bun run build           # vite build → dist/
+bun run assets:optimize # rebuild public/models from assets/models (74 MB → ~3.6 MB)
+bun run e2e             # playwright smoke tests (headless Chromium + SwiftShader)
 ```
 
 ### CI/CD (`.github/workflows/ci.yml`)
@@ -101,8 +127,8 @@ bun run e2e        # playwright smoke tests (headless Chromium + SwiftShader)
 On every push/PR:
 
 1. **check** — typecheck, lint, unit tests, build, and a **size budget**
-   (`scripts/size-budget.mjs` fails if `dist/` exceeds 4 MB — the site can
-   never quietly regress to heavyweight).
+   (`scripts/size-budget.mjs` fails if `dist/` exceeds 25 MB or any file
+   exceeds 4 MB — the site can never quietly regress to heavyweight).
 2. **smoke** — Playwright boots the built site in headless Chromium
    (software WebGL), verifies the menu renders, a solo run starts, the run
    clock ticks, and typing doesn't throw.
@@ -119,12 +145,14 @@ by the smoke suite's "does it boot and play" checks.
 ## Asset licensing
 
 The source code is MIT (see `LICENSE`). The binary models under
-`assets/models/` are third-party downloads with **unverified provenance**
-(names like "Vampire_MAT1", "GLOCK" suggest marketplace assets). They are not
-used by the deployed build, but resolve their licenses before redistributing
-them. `legacy/index.html` is the original pre-elite build, kept for reference.
+`assets/models/` (and their compressed derivatives in `public/models/`) are
+third-party downloads with **unverified provenance** (names like
+"Vampire_MAT1", "GLOCK" suggest marketplace assets). Resolve their licenses
+before redistributing them. `legacy/index.html` is the original pre-elite
+build, kept for reference.
 
 ## Credits
 
-- Original concept, first build, and the procedural rig DNA: **Jaime Sinclair**
-- Elite rebuild: deterministic engine, P2P co-op, CI/CD, tests — 2026
+- Original concept, first build, and the artist models: **Jaime Sinclair**
+- Elite rebuild: deterministic engine, HD asset pipeline + procedural Mixamo
+  animation, P2P co-op, CI/CD, tests — 2026

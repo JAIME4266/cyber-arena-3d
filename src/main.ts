@@ -9,13 +9,14 @@
 import './ui/styles.css'
 import { randomCode, isValidCode } from './core/rng'
 import { dailySeed } from './core/stats'
-import { GameRenderer } from './render/renderer'
+import { GameRenderer, isSoftwareRenderer } from './render/renderer'
 import { AudioEngine } from './render/audio'
 import { Menu, howToPlayContent, overlayCard, settingsContent, coopJoinCard, type MenuCallbacks, type Settings } from './ui/menu'
 import { OverlayScreens } from './ui/overlay'
 import { IdleScene } from './app/menuscene'
 import { Session, type SessionMode } from './app/session'
 import { loadSettings, saveSettings } from './app/persist'
+import { assets } from './render/assets'
 import { NetRoom } from './net/room'
 import { NetHost } from './net/host'
 import { NetClient } from './net/client'
@@ -54,6 +55,8 @@ class App {
   private lobbyDismiss: (() => void) | null = null
   private raf = 0
   private lastIdle = 0
+  private hdGate: HTMLElement | null = null
+  private hdPoll: number | null = null
 
   constructor() {
     const canvas = document.getElementById('c') as HTMLCanvasElement
@@ -69,8 +72,85 @@ class App {
     this.menu = new Menu(app, this.menuCallbacks())
 
     window.addEventListener('resize', () => this.renderer.resize())
+    this.bootAssets()
     this.bootIdle()
     this.routeUrl()
+  }
+
+  /* ---------------- HD asset pack ---------------- */
+
+  /** True when HD models should be used: user setting on, and either a real
+   *  GPU or an explicit ?hd=1 override (also used for verification). Software
+   *  renderers (CI SwiftShader, weak iGPUs) fall back to procedural actors,
+   *  which keeps the game fast exactly where models would crush frame times. */
+  private hdAllowed(): boolean {
+    const forceHd = new URLSearchParams(location.search).get('hd') === '1'
+    return !isSoftwareRenderer() || forceHd
+  }
+
+  /** Kick off the model download and reflect progress on the menu. */
+  private bootAssets(): void {
+    const wanted = this.settings.hd && this.hdAllowed()
+    assets.setHdWanted(wanted)
+    if (!this.settings.hd) {
+      this.menu.setHdStatus('HD MODELS · OFF (SETTINGS)', 'off')
+      return
+    }
+    if (!this.hdAllowed()) {
+      this.menu.setHdStatus('HD MODELS · PERFORMANCE MODE OFF', 'off')
+      return
+    }
+    if (this.hdPoll !== null) window.clearInterval(this.hdPoll)
+    this.hdPoll = window.setInterval(() => {
+      const pct = Math.round(assets.progress * 100)
+      if (assets.pending()) {
+        this.menu.setHdStatus(`HD ASSETS · ${pct}%`)
+      } else {
+        if (this.hdPoll !== null) window.clearInterval(this.hdPoll)
+        this.hdPoll = null
+        if (assets.state === 'ready') {
+          this.menu.setHdStatus('HD MODELS · ONLINE', 'on')
+          this.screens.toast('HD MODELS ONLINE — FULL VISUAL LOADOUT DEPLOYED', 'ok')
+        } else {
+          this.menu.setHdStatus('HD MODELS · OFFLINE', 'off')
+          this.screens.toast('HD MODELS UNAVAILABLE — PROCEDURAL MODE ACTIVE', 'err')
+        }
+      }
+    }, 120)
+  }
+
+  /** Full-screen progress gate shown when a run starts mid-download. */
+  private showHdGate(): void {
+    if (this.hdGate) return
+    const gate = elId('div', 'hd-gate')
+    const box = el('div')
+    box.append(el('div', 'hd-title', 'DEPLOYING HD ASSETS'))
+    const bar = elId('div', 'hd-bar')
+    bar.append(el('i'))
+    box.append(bar)
+    box.append(el('div', 'hd-sub', 'STREAMING MODELS · WEAPONS · SKYLINE'))
+    gate.append(box)
+    document.getElementById('app')!.append(gate)
+    this.hdGate = gate
+  }
+
+  private hideHdGate(): void {
+    this.hdGate?.remove()
+    this.hdGate = null
+  }
+
+  /** Wait (bounded) for the pack so sessions start with models, not stubs. */
+  private async gateAssets(): Promise<void> {
+    if (!assets.pending()) return
+    this.showHdGate()
+    const bar = this.hdGate?.querySelector('.hd-bar i') as HTMLElement | null
+    const tick = window.setInterval(() => {
+      if (bar) bar.style.width = `${Math.round(assets.progress * 100)}%`
+    }, 80)
+    const timeout = new Promise<void>(resolve => window.setTimeout(resolve, 15_000))
+    await Promise.race([assets.whenReady(), timeout])
+    window.clearInterval(tick)
+    this.hideHdGate()
   }
 
   private menuCallbacks(): MenuCallbacks {
@@ -87,9 +167,11 @@ class App {
       onSettings: () => {
         const { card, close } = overlayCard(document.getElementById('app')!, 'SETTINGS', () => undefined)
         settingsContent(card, this.settings, s => {
+          const hdChanged = s.hd !== this.settings.hd
           this.settings = s
           saveSettings(s)
           this.audio.applySettings(s)
+          if (hdChanged) this.bootAssets()
         })
         close()
       },
@@ -121,9 +203,10 @@ class App {
 
   /* ---------------- sessions ---------------- */
 
-  private startSession(mode: SessionMode, seed: string): void {
+  private async startSession(mode: SessionMode, seed: string): Promise<void> {
     this.audio.unlock()
     this.audio.sfx('ui')
+    await this.gateAssets()
     this.stopIdle()
     this.menu.show(false)
     const isCoop = mode === 'coop-host' || mode === 'coop-guest'

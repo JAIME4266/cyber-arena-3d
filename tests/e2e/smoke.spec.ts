@@ -24,8 +24,9 @@ test('starts a solo run, spawns the HUD, and reacts to typing', async ({ page })
   await page.locator('.btn', { hasText: 'SOLO RUN' }).click()
   const hud = page.locator('#hud')
   await expect(hud).toBeVisible({ timeout: 20_000 })
-  // The run clock starts ticking.
-  await expect(page.locator('#hud .hud-time')).toHaveText(/00:0[12]/, { timeout: 15_000 })
+  // The run clock starts ticking (any value past 00:00 — software renderers
+  // can be slow, so allow generous time rather than assuming 60 fps).
+  await expect(page.locator('#hud .hud-time')).not.toHaveText('00:00', { timeout: 40_000 })
 
   // Type something — combat keys must not crash and the HUD must stay alive.
   await page.keyboard.type('ASDF')

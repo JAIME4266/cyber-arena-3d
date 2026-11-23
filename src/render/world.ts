@@ -9,6 +9,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { ARENA, OBSTACLES } from '../core/constants'
+import { assets } from './assets'
 
 function makeTexture(size: number, draw: (g: CanvasRenderingContext2D, s: number) => void, repeat = 1): THREE.CanvasTexture {
   const c = document.createElement('canvas')
@@ -31,6 +32,8 @@ export class World {
   private readonly dust: THREE.Points
   private readonly sky: THREE.Mesh
   private readonly disposables: Array<{ dispose(): void }> = []
+  private heroAdded = false
+  private readonly offAssetsReady: () => void
 
   constructor(scene: THREE.Scene) {
     scene.background = new THREE.Color(0x05070f)
@@ -294,6 +297,58 @@ export class World {
     scene.add(this.dust)
 
     this.disposables.push(skyTex, floorTex, decalTex, metalTex, dark)
+
+    /* ---------- hero skyline (artist building model) ---------- */
+    this.offAssetsReady = assets.onReady(() => this.addHeroBuildings(scene))
+  }
+
+  /**
+   * A ring of the artist-authored building model breaks up the procedural
+   * city with real architecture — placed deterministically outside the arena.
+   */
+  private addHeroBuildings(scene: THREE.Scene): void {
+    if (this.heroAdded) return
+    const tpl = assets.get('building')
+    if (!tpl) return
+    this.heroAdded = true
+
+    // Deterministic scatter on a ring outside the barrier (LCG, fixed seed).
+    let rngState = 0x9e3779b9
+    const rand = (): number => {
+      rngState = (Math.imul(rngState, 1664525) + 1013904223) >>> 0
+      return rngState / 0xffffffff
+    }
+    const ring = new THREE.Group()
+    ring.name = 'heroBuildings'
+    const COUNT = 14
+    for (let i = 0; i < COUNT; i++) {
+      const angle = (i / COUNT) * Math.PI * 2 + rand() * 0.35
+      const dist = 165 + rand() * 110
+      const x = Math.cos(angle) * dist
+      const z = Math.sin(angle) * dist
+      // Skip the four street axes so the skyline doesn't block sightlines.
+      if (Math.abs(Math.cos(angle)) > 0.94 || Math.abs(Math.sin(angle)) > 0.94) continue
+      const h = 62 + rand() * 95
+      const b = tpl.scene.clone(true)
+      b.scale.set(h, h, h)
+      b.position.set(x, -tpl.minY * h, z)
+      b.rotation.y = Math.floor(rand() * 4) * (Math.PI / 2) + (rand() - 0.5) * 0.4
+      ring.add(b)
+    }
+    ring.traverse(o => {
+      const mesh = o as THREE.Mesh
+      if (mesh.isMesh) {
+        mesh.castShadow = false
+        mesh.receiveShadow = false
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial
+          if (std.isMeshStandardMaterial) std.envMapIntensity = 0.9
+        }
+      }
+    })
+    scene.add(ring)
+    this.disposables.push({ dispose: (): void => { ring.removeFromParent() } })
   }
 
   /**
@@ -396,6 +451,7 @@ export class World {
   }
 
   dispose(): void {
+    this.offAssetsReady()
     for (const d of this.disposables) d.dispose()
     this.barrierMat.dispose()
   }

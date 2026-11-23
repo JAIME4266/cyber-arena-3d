@@ -4,8 +4,10 @@
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-const TOTAL_MAX = 4 * 1024 * 1024 // 4 MB total
-const FILE_MAX = 2 * 1024 * 1024 // 2 MB per file
+// Elite-build budget: generous enough for the compressed HD model pack
+// (~3.7 MB of GLBs), tight enough to keep first paint fast on Pages.
+const TOTAL_MAX = 25 * 1024 * 1024 // 25 MB total
+const FILE_MAX = 4 * 1024 * 1024   // 4 MB per file
 
 const files = []
 function walk(dir) {

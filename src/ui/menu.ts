@@ -18,6 +18,7 @@ export interface MenuCallbacks {
 export interface Settings extends AudioSettings {
   shake: boolean
   speedlines: boolean
+  hd: boolean
   name?: string
 }
 
@@ -38,6 +39,7 @@ function btn(label: string, hint: string, cls: string, onClick: () => void): HTM
 export class Menu {
   readonly root: HTMLElement
   private readonly menuMain: HTMLElement
+  private readonly hdStatus: HTMLElement
 
   constructor(parent: HTMLElement, cb: MenuCallbacks) {
     this.root = el('div')
@@ -47,6 +49,9 @@ export class Menu {
     h1.append('CYBER ARENA ', el('em', '', '3D'))
     this.root.append(h1)
     this.root.append(el('div', 'tagline', 'TYPING COMBAT · ELITE PROTOCOL'))
+
+    this.hdStatus = el('div', 'hd-status', 'HD ASSETS · STANDBY')
+    this.root.append(this.hdStatus)
 
     this.menuMain = el('div', 'menu-grid')
     this.menuMain.append(
@@ -68,6 +73,12 @@ export class Menu {
 
   show(visible: boolean): void {
     this.root.style.display = visible ? 'flex' : 'none'
+  }
+
+  /** Boot/progress line for the HD asset pack (shown on the main menu). */
+  setHdStatus(text: string, cls = ''): void {
+    this.hdStatus.textContent = text
+    this.hdStatus.className = `hd-status${cls ? ` ${cls}` : ''}`
   }
 
   showMain(visible: boolean): void {
@@ -192,6 +203,7 @@ export function settingsContent(card: HTMLElement, s: Settings, onChange: (s: Se
   card.append(row('SFX VOLUME', sfx))
   card.append(row('CAMERA SHAKE', toggle(s.shake, v => onChange({ ...s, shake: v }))))
   card.append(row('SPEED LINES', toggle(s.speedlines, v => onChange({ ...s, speedlines: v }))))
+  card.append(row('HD MODELS', toggle(s.hd, v => onChange({ ...s, hd: v }))))
 
   const nameRow = el('div', 'set-row')
   nameRow.append(el('label', '', 'CALLSIGN (CO-OP)'))
