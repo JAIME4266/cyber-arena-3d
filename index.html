@@ -3,30 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#05070f">
-  <meta name="description" content="Cyber Arena 3D — Elite: a typing-combat arena shooter. Run, jump, dash and type to survive. Solo, daily challenges and serverless P2P co-op.">
-  <meta property="og:title" content="Cyber Arena 3D — Elite">
-  <meta property="og:description" content="Typing-combat arena shooter with P2P co-op. No server, no account.">
-  <title>Cyber Arena 3D — Elite</title>
+  <meta name="theme-color" content="#1d1f1a">
+  <meta name="description" content="RANGE HOT — a live-fire typing range. Run, sprint, jump and type to keep the range clear. Solo drills, daily seeds and serverless P2P squad runs.">
+  <meta property="og:title" content="RANGE HOT — Live-Fire Typing Range">
+  <meta property="og:description" content="A real-world typing arena shooter with P2P squad co-op. No server, no account.">
+  <title>RANGE HOT — Live-Fire Typing Range</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <style>
-    html, body { margin: 0; height: 100%; background: #05070f; color: #e2e8f0; font-family: 'Courier New', ui-monospace, monospace; overflow: hidden }
+    html, body { margin: 0; height: 100%; background: #1d1f1a; color: #e6e0cf; font-family: 'Barlow', system-ui, sans-serif; overflow: hidden }
     #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
-    #boot { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: #05070f; text-align: center }
-    #boot .boot-title { font-size: clamp(28px, 6vw, 56px); font-weight: 900; letter-spacing: 6px; color: #38bdf8; text-shadow: 0 0 24px rgba(56,189,248,.7) }
-    #boot .boot-sub { margin-top: 8px; font-size: 12px; letter-spacing: 4px; color: #94a3b8 }
-    #boot .boot-bar { margin: 26px auto 0; width: 220px; height: 8px; background: #0f1c33; overflow: hidden; transform: skewX(-20deg) }
-    #boot .boot-bar i { display: block; height: 100%; width: 40%; background: #22d3ee; box-shadow: 0 0 12px #22d3ee; animation: bootslide 1.1s ease-in-out infinite alternate }
+    /* Boot splash: stenciled placard, mechanical loader — mirrors DESIGN.md */
+    #boot { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: #1d1f1a; text-align: center }
+    #boot .boot-title { font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size: clamp(40px, 9vw, 84px); font-weight: 700; letter-spacing: .08em; line-height: .95; color: #e6e0cf }
+    #boot .boot-title b { color: #e8742c; font-weight: 700 }
+    #boot .boot-rule { width: 84px; height: 6px; background: #e8742c; margin: 14px auto 0 }
+    #boot .boot-sub { margin-top: 12px; font-size: 11px; letter-spacing: .42em; color: #a89f85; text-transform: uppercase }
+    #boot .boot-bar { margin: 26px auto 0; width: 220px; height: 6px; background: #2c2f28; overflow: hidden }
+    #boot .boot-bar i { display: block; height: 100%; width: 40%; background: #e8742c; animation: bootslide 1.1s ease-in-out infinite alternate }
     @keyframes bootslide { from { transform: translateX(-60%) } to { transform: translateX(260%) } }
   </style>
 </head>
 <body>
-  <canvas id="c" aria-label="Cyber Arena 3D game canvas"></canvas>
+  <canvas id="c" aria-label="RANGE HOT game canvas"></canvas>
   <div id="app"></div>
   <div id="boot">
     <div>
-      <div class="boot-title">CYBER ARENA 3D</div>
-      <div class="boot-sub">ELITE BUILD — LOADING</div>
+      <div class="boot-title">RANGE <b>HOT</b></div>
+      <div class="boot-rule"></div>
+      <div class="boot-sub">Live-fire typing range — loading</div>
       <div class="boot-bar"><i></i></div>
     </div>
   </div>

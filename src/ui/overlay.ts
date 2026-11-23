@@ -59,7 +59,7 @@ export class OverlayScreens {
     const win = vm.over === 1
     this.gameover.innerHTML = ''
     const box = el('div', `go-box${win ? ' win' : ''}`)
-    box.append(el('h1', '', win ? 'SYSTEM SECURED' : 'CRITICAL OVERLOAD'))
+    box.append(el('h1', '', win ? 'RANGE CLEAR' : 'OPERATOR DOWN'))
     const total = players.reduce((s, p) => s + p.score, 0)
     box.append(el('div', 'go-rank', rank(total)))
     const stats = el('div', 'go-stats')
@@ -74,22 +74,22 @@ export class OverlayScreens {
       addStat(`${p.name} KILLS`, String(p.kills))
       addStat(`${p.name} WPM`, String(wpm(p.correct, elapsedMs)))
       addStat(`${p.name} ACCURACY`, `${accuracy(p.correct, p.wrong)}%`)
-      addStat(`${p.name} BEST COMBO`, `${p.bestCombo}x`)
+      addStat(`${p.name} BEST STREAK`, `${p.bestCombo}x`)
     }
     addStat('TIME', formatClock(vm.time))
     addStat('WAVE', vm.wave === 3 ? 'BOSS' : String(vm.wave))
     box.append(stats)
     const row = el('div', 'row-actions')
-    const retry = el('button', 'btn', 'REBOOT RUN')
+    const retry = el('button', 'btn primary', 'RUN IT BACK')
     retry.addEventListener('click', actions.onRetry)
-    const share = el('button', 'btn amber', 'SHARE RESULT')
+    const share = el('button', 'btn', 'SHARE RESULT')
     share.addEventListener('click', actions.onShare)
-    const menu = el('button', 'btn magenta', 'MAIN MENU')
+    const menu = el('button', 'btn', 'MAIN MENU')
     menu.addEventListener('click', actions.onMenu)
     row.append(retry, share, menu)
     box.append(row)
     this.gameover.append(box)
-    this.shareText = `Cyber Arena 3D — ${mode}${seed ? ` (${seed})` : ''}\n` +
+    this.shareText = `RANGE HOT — ${mode}${seed ? ` (${seed})` : ''}\n` +
       `${rank(total)}\n` +
       players.map(p => `${p.name}: ${formatScore(p.score)} pts · ${p.kills} kills · ${wpm(p.correct, elapsedMs)} WPM · ${accuracy(p.correct, p.wrong)}% acc`).join('\n')
     this.gameover.classList.add('show')
@@ -110,11 +110,11 @@ export class OverlayScreens {
     card.style.textAlign = 'center'
     card.append(el('h2', '', 'PAUSED'))
     const r = el('div', 'row-actions')
-    const resume = el('button', 'btn green', 'RESUME')
+    const resume = el('button', 'btn primary', 'RESUME')
     resume.addEventListener('click', actions.onResume)
-    const restart = el('button', 'btn amber', 'RESTART')
+    const restart = el('button', 'btn', 'RESTART')
     restart.addEventListener('click', actions.onRestart)
-    const menu = el('button', 'btn magenta', 'QUIT TO MENU')
+    const menu = el('button', 'btn', 'QUIT TO MENU')
     menu.addEventListener('click', actions.onMenu)
     r.append(resume, restart, menu)
     card.append(r)

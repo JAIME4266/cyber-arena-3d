@@ -45,28 +45,33 @@ export class Menu {
     this.root = el('div')
     this.root.id = 'menu'
 
-    const h1 = el('h1')
-    h1.append('CYBER ARENA ', el('em', '', '3D'))
-    this.root.append(h1)
-    this.root.append(el('div', 'tagline', 'TYPING COMBAT · ELITE PROTOCOL'))
+    const board = el('div', 'menu-board')
 
-    this.hdStatus = el('div', 'hd-status', 'HD ASSETS · STANDBY')
-    this.root.append(this.hdStatus)
+    const h1 = el('h1')
+    h1.append('RANGE ', el('em', '', 'HOT'))
+    board.append(h1)
+    board.append(el('div', 'title-rule'))
+    board.append(el('div', 'tagline', 'LIVE-FIRE TYPING RANGE'))
+
+    this.hdStatus = el('div', 'hd-status', 'HD MODELS · STANDBY')
+    board.append(this.hdStatus)
 
     this.menuMain = el('div', 'menu-grid')
     this.menuMain.append(
-      btn('SOLO RUN', 'ENDLESS ARENA', '', cb.onSolo),
-      btn('DAILY CHALLENGE', dailySeed().toUpperCase().replace('DAILY-', '· ') + ' · SAME SEED FOR EVERYONE', 'amber', cb.onDaily),
-      btn('CO-OP: CREATE ROOM', 'P2P · SHARE A 6-CHAR CODE', 'magenta', cb.onCoopCreate),
-      btn('CO-OP: JOIN ROOM', 'ENTER FRIEND\u2019S CODE', 'magenta', cb.onCoopJoin),
-      btn('HOW TO PLAY', 'CONTROLS + RULES', 'green', cb.onHowToPlay),
+      btn('SOLO DRILL', 'FREE RANGE · ENDLESS', 'primary', cb.onSolo),
+      btn('DAILY DRILL', dailySeed().toUpperCase().replace('DAILY-', '\u00b7 ') + ' · SAME SEED FOR EVERYONE', '', cb.onDaily),
+      btn('SQUAD: HOST ROOM', 'P2P · SHARE A 6-CHAR CODE', '', cb.onCoopCreate),
+      btn('SQUAD: JOIN ROOM', 'ENTER FRIEND\u2019S CODE', '', cb.onCoopJoin),
+      btn('HOW TO PLAY', 'BRIEFING + CONTROLS', '', cb.onHowToPlay),
       btn('SETTINGS', 'AUDIO · FX · CALLSIGN', '', cb.onSettings),
     )
-    this.root.append(this.menuMain)
+    board.append(this.menuMain)
 
     const foot = el('div', 'menu-foot')
-    foot.append(el('span', '', `V${VERSION} · ORIGINAL BUILD BY JAIME · ELITE REBUILD`))
-    this.root.append(foot)
+    foot.append(el('span', '', `V${VERSION} · A JAIME ORIGINAL · RANGE HOT REBUILD`))
+    board.append(foot)
+
+    this.root.append(board)
 
     parent.append(this.root)
   }
@@ -131,13 +136,13 @@ export function overlayCard(
 }
 
 export function howToPlayContent(card: HTMLElement): void {
-  card.append(el('p', '', 'A typing-combat arena. Enemies close in — kill them by typing the letters above their heads. You cannot stand still: run, jump, and dash while you type.'))
+  card.append(el('p', '', 'A live-fire typing range. Hostiles close in — put them down by typing the letters stenciled above their heads. You cannot stand still: run, jump, and sprint while you type.'))
   const k = el('div')
   for (const [a, b] of [
     ['MOVE', 'Arrow keys'],
     ['SHOOT', 'Type home-row keys: A S D F G H J K L ; \' ,'],
-    ['JUMP', 'Space — dodge bullets & shockwaves'],
-    ['DASH', 'Shift — quick burst with brief invulnerability'],
+    ['JUMP', 'Space — dodge rounds & blast waves'],
+    ['SPRINT', 'Shift — quick burst with brief invulnerability'],
     ['PAUSE', 'Esc (solo only)'],
   ] as const) {
     const r = el('div', 'krow')
@@ -148,16 +153,16 @@ export function howToPlayContent(card: HTMLElement): void {
   card.append(el('h3', '', 'RULES'))
   const ul = el('ul')
   for (const t of [
-    'Correct keys build COMBO. Miss or get hit — combo breaks.',
-    'Combo OVERCLOCKS you: faster movement, multiplied score.',
-    'THREAT climbs with kills: the arena gets meaner. Waves at 50 and 100 kills.',
-    'Wave 2: Elites fire lasers — jump them (they fly low).',
-    'Wave 3: the Overlord Core. Shockwaves, bullet rings, aimed volleys.',
-    'Green EMP bubbles halve your speed. Yellow cells restore shields.',
+    'Correct keys build a STREAK. Miss or get hit — the streak breaks.',
+    'The streak feeds ADRENALINE: faster movement, multiplied score.',
+    'THREAT climbs with kills: the range gets meaner. Waves at 50 and 100 kills.',
+    'Wave 2: Gunners fire low — jump their rounds. They need 2-key sequences.',
+    'Wave 3: the JUGGERNAUT. Blast waves, bullet rings, aimed volleys.',
+    'Yellow-green GAS clouds halve your speed. White MED KITS restore armor plates.',
   ]) ul.append(el('li', '', t))
   card.append(ul)
-  card.append(el('h3', '', 'CO-OP'))
-  card.append(el('p', '', 'Create a room, send the 6-char code to a friend, and fight the same arena together over a direct browser-to-browser connection. No server, no account.'))
+  card.append(el('h3', '', 'SQUAD LINK'))
+  card.append(el('p', '', 'Host a room, send the 6-char code to a friend, and fight the same range together over a direct browser-to-browser connection. No server, no account.'))
   card.append(el('p', '', 'If the code ever fails to connect, switch to DIRECT LINK: send the invite code over any messenger and paste the reply back — it works with zero relays.'))
 }
 

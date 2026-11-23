@@ -12,12 +12,12 @@ export function accuracy(correct: number, wrong: number): number {
 }
 
 export function rank(score: number): string {
-  if (score >= 20000) return 'S — OVERLORD SLAYER'
-  if (score >= 12000) return 'A — CYBER ACE'
-  if (score >= 7000) return 'B — NODE BREAKER'
-  if (score >= 3000) return 'C — RUNNER'
-  if (score >= 1000) return 'D — SCRIPT KID'
-  return 'E — ROOKIE'
+  if (score >= 20000) return 'S — JUGGERNAUT SLAYER'
+  if (score >= 12000) return 'A — RANGE ACE'
+  if (score >= 7000) return 'B — SOLID OPERATOR'
+  if (score >= 3000) return 'C — REGULAR'
+  if (score >= 1000) return 'D — CADET'
+  return 'E — RECRUIT'
 }
 
 export function formatClock(seconds: number): string {

@@ -108,7 +108,7 @@ describe('stats', () => {
     expect(formatClock(75)).toBe('01:15')
     expect(formatScore(12345)).toBe('12,345')
     expect(rank(25000)).toContain('S')
-    expect(rank(100)).toContain('ROOKIE')
+    expect(rank(100)).toContain('RECRUIT')
   })
 
   it('daily seed is date-stable', () => {

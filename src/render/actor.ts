@@ -326,13 +326,13 @@ export class Actor implements ActorView {
   }
 }
 
-/* ---------- Shared palettes ---------- */
+/* ---------- Shared palettes: real fatigues, high-vis markers ---------- */
 
-export const PLAYER_PALETTE: Palette = { suit: 0x0c1626, armor: 0x16263f, neon: 0x35e0ff, gun: false, scale: 1, playerRifle: true }
-export const PLAYER2_PALETTE: Palette = { suit: 0x1a0c26, armor: 0x2f1663, neon: 0xff3df0, gun: false, scale: 1, playerRifle: true }
+export const PLAYER_PALETTE: Palette = { suit: 0x4a5240, armor: 0x353b2e, neon: 0xe8742c, gun: false, scale: 1, playerRifle: true }
+export const PLAYER2_PALETTE: Palette = { suit: 0x8a7a5c, armor: 0x5c523c, neon: 0xe9e4d2, gun: false, scale: 1, playerRifle: true }
 export const ENEMY_PALETTES: Record<string, Palette> = {
-  RUNNER: { suit: 0x0a0b10, armor: 0x15161d, neon: 0xfacc15, hood: true, scale: 0.82 },
-  GRUNT: { suit: 0x0a0b10, armor: 0x15161d, neon: 0xff2d4d, hood: true, scale: 1 },
-  ELITE: { suit: 0x0a0b10, armor: 0x15161d, neon: 0xff3df0, hood: true, gun: true, scale: 1.15 },
-  BOSS: { suit: 0x0a0b10, armor: 0x15161d, neon: 0xff6a00, hood: true, heavy: true, scale: 2.3 },
+  RUNNER: { suit: 0x3f4536, armor: 0x2e3329, neon: 0xdfa93b, hood: true, scale: 0.82 },
+  GRUNT: { suit: 0x43392f, armor: 0x322b24, neon: 0xc0452f, hood: true, scale: 1 },
+  ELITE: { suit: 0x35393b, armor: 0x26292c, neon: 0xcc5f26, hood: true, gun: true, scale: 1.15 },
+  BOSS: { suit: 0x2b2b28, armor: 0x1f201d, neon: 0xa83524, hood: true, heavy: true, scale: 2.3 },
 }

@@ -1,10 +1,14 @@
 /**
- * The arena world: sky dome, floor, grid, energy barrier (custom GLSL),
- * pylons, power-generator obstacles, a procedural neon city merged into a
- * handful of draw calls, and drifting dust.
+ * The arena world — a real-world live-fire training compound at golden hour.
+ *
+ * Asphalt with painted range lines and a central helipad, a chain-link
+ * perimeter on steel posts with a concrete curb, floodlight masts, CONEX
+ * container obstacles with stencil markings, and a base backdrop: barracks,
+ * a hangar, a water tower, watchtowers, treeline and hazy hills. The artist
+ * building model rings the compound as distant base structures.
  *
  * Everything is generated from canvas textures at runtime — zero asset
- * downloads, instant boot, and a cohesive cyber look.
+ * downloads, instant boot, and one cohesive real place. See DESIGN.md.
  */
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
@@ -24,11 +28,28 @@ function makeTexture(size: number, draw: (g: CanvasRenderingContext2D, s: number
   return t
 }
 
+/** Theme palette (DESIGN.md §4) as hex for canvas painting. */
+const C = {
+  asphalt: '#65625a',
+  paint: 'rgba(232, 226, 208, 0.8)',
+  helipad: '#d8a03c',
+  steelPost: '#4c5049',
+  olive: '#5c6147',
+  rust: '#8a6f4d',
+  hazard: '#c9a437',
+  hazardDark: '#2a2c22',
+  concrete: '#7d7a70',
+  barracksWall: '#9a9078',
+  windowGlass: '#2e3438',
+  roofGray: '#6a6d64',
+  tree: '#39442e',
+  hill: '#6b705f',
+}
+
 export class World {
   readonly keyLight: THREE.DirectionalLight
   readonly playerLight: THREE.PointLight
   readonly boomLight: THREE.PointLight
-  private readonly barrierMat: THREE.ShaderMaterial
   private readonly dust: THREE.Points
   private readonly sky: THREE.Mesh
   private readonly disposables: Array<{ dispose(): void }> = []
@@ -36,42 +57,55 @@ export class World {
   private readonly offAssetsReady: () => void
 
   constructor(scene: THREE.Scene) {
-    scene.background = new THREE.Color(0x05070f)
-    scene.fog = new THREE.FogExp2(0x180a38, 0.0036)
+    scene.background = new THREE.Color(0xb8b2a2)
+    scene.fog = new THREE.FogExp2(0xbdb5a3, 0.0019)
 
-    /* ---------- lights ---------- */
-    scene.add(new THREE.HemisphereLight(0x6f8cff, 0x20103a, 1.05))
-    this.keyLight = new THREE.DirectionalLight(0xa8d4ff, 1.6)
+    /* ---------- lights: golden hour, overcast breaking ---------- */
+    scene.add(new THREE.HemisphereLight(0xb9c3cf, 0x8a7f6a, 0.75))
+    this.keyLight = new THREE.DirectionalLight(0xffd2a0, 2.4)
     this.keyLight.castShadow = true
     this.keyLight.shadow.mapSize.set(1024, 1024)
-    Object.assign(this.keyLight.shadow.camera, { near: 10, far: 200, left: -48, right: 48, top: 48, bottom: -48 })
+    Object.assign(this.keyLight.shadow.camera, { near: 10, far: 260, left: -52, right: 52, top: 52, bottom: -52 })
     this.keyLight.shadow.bias = -0.0005
     scene.add(this.keyLight, this.keyLight.target)
-    const rim = new THREE.DirectionalLight(0xe02bd8, 0.9)
-    rim.position.set(-40, 30, -60)
+    // Cool sky bounce from the opposite side (no second shadow caster).
+    const rim = new THREE.DirectionalLight(0xa8b4c2, 0.55)
+    rim.position.set(-60, 40, -50)
     scene.add(rim)
-    this.playerLight = new THREE.PointLight(0x38bdf8, 2.2, 40)
+    this.playerLight = new THREE.PointLight(0xffe2b8, 1.1, 40)
     this.boomLight = new THREE.PointLight(0xffaa55, 0, 50)
     scene.add(this.playerLight, this.boomLight)
 
-    /* ---------- sky dome ---------- */
+    /* ---------- sky dome: steel gray, warm horizon, soft clouds ---------- */
     const skyTex = makeTexture(1024, (g, s) => {
       const grad = g.createLinearGradient(0, 0, 0, s)
-      for (const [stop, color] of [[0, '#02030a'], [0.35, '#0b1233'], [0.5, '#3b1363'], [0.58, '#7a1f8f'], [0.6, '#0a1226'], [1, '#05070f']] as const) {
+      for (const [stop, color] of [[0, '#6f7c8b'], [0.34, '#8f99a3'], [0.46, '#c3bda9'], [0.52, '#e3cfa8'], [0.56, '#d9c49e'], [0.62, '#bdb5a2'], [1, '#a9a294']] as const) {
         grad.addColorStop(stop, color)
       }
       g.fillStyle = grad
       g.fillRect(0, 0, s, s)
-      for (let i = 0; i < 700; i++) {
-        g.fillStyle = `rgba(255,255,255,${0.2 + Math.random() * 0.8})`
-        g.fillRect(Math.random() * s, Math.random() * s * 0.5, Math.random() < 0.1 ? 2 : 1, 1.5)
+      // Soft cloud streaks
+      for (let i = 0; i < 26; i++) {
+        const y = s * (0.06 + Math.random() * 0.34)
+        const w = s * (0.14 + Math.random() * 0.3)
+        const h = 6 + Math.random() * 16
+        const x = Math.random() * s
+        g.fillStyle = `rgba(214, 212, 205, ${0.10 + Math.random() * 0.16})`
+        g.beginPath()
+        g.ellipse(x, y, w, h, 0, 0, 7)
+        g.fill()
+        g.fillStyle = `rgba(240, 236, 226, ${0.05 + Math.random() * 0.08})`
+        g.beginPath()
+        g.ellipse(x + w * 0.2, y - h * 0.4, w * 0.7, h * 0.55, 0, 0, 7)
+        g.fill()
       }
-      const moon = g.createRadialGradient(700, 150, 4, 700, 150, 90)
-      moon.addColorStop(0, 'rgba(255,240,255,1)')
-      moon.addColorStop(0.2, 'rgba(240,171,252,.5)')
-      moon.addColorStop(1, 'rgba(240,171,252,0)')
-      g.fillStyle = moon
-      g.fillRect(560, 10, 280, 280)
+      // Low sun bleeding through the haze
+      const sun = g.createRadialGradient(s * 0.78, s * 0.52, 8, s * 0.78, s * 0.52, 240)
+      sun.addColorStop(0, 'rgba(255, 236, 200, 0.95)')
+      sun.addColorStop(0.25, 'rgba(250, 220, 170, 0.5)')
+      sun.addColorStop(1, 'rgba(250, 220, 170, 0)')
+      g.fillStyle = sun
+      g.fillRect(0, s * 0.3, s, s * 0.4)
     })
     skyTex.wrapS = skyTex.wrapT = THREE.ClampToEdgeWrapping
     this.sky = new THREE.Mesh(
@@ -80,19 +114,34 @@ export class World {
     )
     scene.add(this.sky)
 
-    /* ---------- floor ---------- */
+    /* ---------- floor: asphalt with painted range lines ---------- */
     const floorTex = makeTexture(256, (g, s) => {
-      g.fillStyle = 'rgb(9,16,36)'
+      g.fillStyle = C.asphalt
       g.fillRect(0, 0, s, s)
+      // Aggregate speckle
       for (let i = 0; i < 900; i++) {
-        g.fillStyle = `rgba(140,180,255,${Math.random() * 0.07})`
+        const v = Math.random()
+        g.fillStyle = v < 0.5
+          ? `rgba(30, 30, 26, ${0.06 + Math.random() * 0.1})`
+          : `rgba(200, 195, 180, ${0.03 + Math.random() * 0.07})`
         g.fillRect(Math.random() * s, Math.random() * s, 2, 2)
       }
-      g.strokeStyle = 'rgba(70,110,180,.95)'
+      // Worn tire streaks
+      g.strokeStyle = 'rgba(28, 28, 24, 0.10)'
+      g.lineWidth = 7
+      for (let i = 0; i < 3; i++) {
+        g.beginPath()
+        const x = Math.random() * s
+        g.moveTo(x, 0)
+        g.bezierCurveTo(x + 18, s * 0.33, x - 18, s * 0.66, x + 8, s)
+        g.stroke()
+      }
+      // Painted range grid (aged white)
+      g.strokeStyle = C.paint
       g.lineWidth = 5
       g.strokeRect(0, 0, s, s)
-      g.lineWidth = 1.5
-      g.strokeStyle = 'rgba(50,80,140,.6)'
+      g.lineWidth = 2
+      g.strokeStyle = 'rgba(232, 226, 208, 0.4)'
       g.beginPath()
       g.moveTo(s / 2, 0); g.lineTo(s / 2, s)
       g.moveTo(0, s / 2); g.lineTo(s, s / 2)
@@ -100,191 +149,68 @@ export class World {
     }, 70)
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(1000, 1000),
-      new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.5, metalness: 0.35 }),
+      new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.94, metalness: 0.02 }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     scene.add(floor)
 
-    const grid = new THREE.GridHelper(ARENA * 2, 36, 0x38bdf8, 0x15375e)
-    grid.position.y = 0.07
-    const gm = grid.material as THREE.Material
-    gm.transparent = true
-    gm.opacity = 0.45
-    grid.renderOrder = 1
-    scene.add(grid)
-
-    /* ---------- center decal ---------- */
-    const decalTex = makeTexture(512, (g, s) => {
-      g.strokeStyle = '#38bdf8'
-      for (const [i, r] of [240, 190, 120].entries()) {
-        g.globalAlpha = 0.9 - i * 0.25
-        g.lineWidth = 6
-        g.beginPath()
-        g.arc(s / 2, s / 2, r, 0, 7)
-        g.stroke()
-      }
-      g.globalAlpha = 0.7
-      g.lineWidth = 3
-      for (let a = 0; a < 8; a++) {
-        const c = Math.cos((a * Math.PI) / 4)
-        const n = Math.sin((a * Math.PI) / 4)
-        g.beginPath()
-        g.moveTo(s / 2 + c * 190, s / 2 + n * 190)
-        g.lineTo(s / 2 + c * 240, s / 2 + n * 240)
-        g.stroke()
-      }
+    /* ---------- center helipad decal ---------- */
+    const padTex = makeTexture(512, (g, s) => {
+      g.strokeStyle = C.helipad
+      g.lineWidth = 16
+      g.beginPath()
+      g.arc(s / 2, s / 2, 226, 0, 7)
+      g.stroke()
+      // H built from bars — no font dependency
+      const bar = 30, hgt = 200, gap = 110
+      g.fillStyle = C.helipad
+      g.fillRect(s / 2 - gap / 2 - bar, s / 2 - hgt / 2, bar, hgt)
+      g.fillRect(s / 2 + gap / 2, s / 2 - hgt / 2, bar, hgt)
+      g.fillRect(s / 2 - gap / 2 - bar, s / 2 - bar / 2, gap + bar * 2, bar)
     })
-    const decal = new THREE.Mesh(
-      new THREE.PlaneGeometry(64, 64),
-      new THREE.MeshBasicMaterial({ map: decalTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
+    const pad = new THREE.Mesh(
+      new THREE.PlaneGeometry(56, 56),
+      new THREE.MeshBasicMaterial({ map: padTex, transparent: true, depthWrite: false, opacity: 0.9 }),
     )
-    decal.rotation.x = -Math.PI / 2
-    decal.position.y = 0.08
-    decal.renderOrder = 1
-    scene.add(decal)
+    pad.rotation.x = -Math.PI / 2
+    pad.position.y = 0.08
+    pad.renderOrder = 1
+    scene.add(pad)
 
-    /* ---------- city (merged into ~4 draw calls) ---------- */
-    this.buildCity(scene)
+    /* ---------- base backdrop: barracks, hangar, towers, treeline, hills ---------- */
+    this.buildBase(scene)
 
-    /* ---------- energy barrier ---------- */
-    this.barrierMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        t: { value: 0 },
-        pp: { value: new THREE.Vector3() },
-        col: { value: new THREE.Color(0x22d3ee) },
-        col2: { value: new THREE.Color(0xe879f9) },
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        varying vec3 vW;
-        void main() {
-          vUv = uv;
-          vec4 w = modelMatrix * vec4(position, 1.0);
-          vW = w.xyz;
-          gl_Position = projectionMatrix * viewMatrix * w;
-        }`,
-      fragmentShader: /* glsl */ `
-        varying vec2 vUv;
-        varying vec3 vW;
-        uniform float t;
-        uniform vec3 pp;
-        uniform vec3 col;
-        uniform vec3 col2;
-        void main() {
-          float L = vW.x + vW.z;
-          vec2 q = abs(fract(vec2(L * 0.22, vW.y * 0.4)) - 0.5);
-          float g = smoothstep(0.44, 0.5, max(q.x, q.y));
-          float sw = smoothstep(0.85, 1.0, sin(L * 0.1 - t * 1.8) * 0.5 + 0.5);
-          float ed = (1.0 - smoothstep(0.0, 0.1, vUv.y)) + smoothstep(0.93, 1.0, vUv.y);
-          float nr = 1.0 - smoothstep(3.0, 34.0, distance(vW.xz, pp.xz));
-          float a = 0.06 + 0.3 * pow(1.0 - vUv.y, 2.0) + g * 0.16 + sw * 0.22 + ed * 0.8 + nr * (0.3 + g * 0.6);
-          gl_FragColor = vec4(mix(col, col2, 0.5 + 0.5 * sin(L * 0.04 + t * 0.5)) * 1.3, clamp(a, 0.0, 1.0));
-        }`,
-    })
-    const dark = new THREE.MeshStandardMaterial({ color: 0x0d1424, roughness: 0.4, metalness: 0.9 })
-    for (const [x, z, ry] of [[0, -ARENA, 0], [0, ARENA, 0], [ARENA, 0, Math.PI / 2], [-ARENA, 0, Math.PI / 2]] as const) {
-      const g = new THREE.Group()
-      g.position.set(x, 0, z)
-      g.rotation.y = ry
-      scene.add(g)
-      const base = new THREE.Mesh(new THREE.BoxGeometry(ARENA * 2, 1.4, 1.6), dark)
-      base.position.y = 0.7
-      base.receiveShadow = true
-      g.add(base)
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(ARENA * 2, 0.22, 1.7), new THREE.MeshBasicMaterial({ color: 0x22d3ee }))
-      strip.position.y = 1.45
-      g.add(strip)
-      const pane = new THREE.Mesh(new THREE.PlaneGeometry(ARENA * 2, 7.4), this.barrierMat)
-      pane.position.y = 5.2
-      g.add(pane)
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(ARENA * 2, 0.16, 0.16), new THREE.MeshBasicMaterial({ color: 0xe879f9 }))
-      rail.position.y = 8.9
-      g.add(rail)
-    }
+    /* ---------- perimeter: chain-link fence on steel posts ---------- */
+    this.buildFence(scene)
 
-    /* ---------- pylons ---------- */
+    /* ---------- floodlight masts ---------- */
     {
       const N = 28
-      const pylons = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 10, 2.6), dark, N)
-      const led1 = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 7.5, 2.8), new THREE.MeshBasicMaterial({ color: 0x22d3ee }), N)
-      const led2 = new THREE.InstancedMesh(new THREE.BoxGeometry(2.8, 7.5, 0.5), new THREE.MeshBasicMaterial({ color: 0x22d3ee }), N)
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0x3d4038, roughness: 0.6, metalness: 0.7 })
+      const headMat = new THREE.MeshStandardMaterial({ color: 0x2a2c26, roughness: 0.5, metalness: 0.6, emissive: 0xffd9a0, emissiveIntensity: 0.35 })
+      const poles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 15, 0.9), poleMat, N)
+      const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(3.4, 1.4, 1.2), headMat, N)
       const mt = new THREE.Matrix4()
       let n = 0
       for (let i = -3; i <= 3; i++) {
         const o = i * 30
         for (const [x, z] of [[o, -ARENA], [o, ARENA], [-ARENA, o], [ARENA, o]] as const) {
-          mt.makeTranslation(x, 5, z)
-          for (const m of [pylons, led1, led2]) m.setMatrixAt(n, mt)
+          mt.makeTranslation(x, 7.5, z)
+          poles.setMatrixAt(n, mt)
+          mt.makeTranslation(x, 15.2, z)
+          heads.setMatrixAt(n, mt)
           n++
         }
       }
-      pylons.castShadow = true
-      scene.add(pylons, led1, led2)
+      poles.castShadow = true
+      scene.add(poles, heads)
     }
 
-    /* ---------- obstacles (power generators) ---------- */
-    const metalTex = makeTexture(256, (g, s) => {
-      g.fillStyle = '#141d30'
-      g.fillRect(0, 0, s, s)
-      g.strokeStyle = '#0a101d'
-      g.lineWidth = 4
-      for (let x = 0; x <= s; x += 64) {
-        g.beginPath()
-        g.moveTo(x, 0)
-        g.lineTo(x, s * 0.8)
-        g.stroke()
-      }
-      g.fillStyle = '#facc15'
-      g.fillRect(0, s * 0.84, s, s * 0.16)
-      g.fillStyle = '#111'
-      for (let x = -s; x < s * 2; x += 32) {
-        g.beginPath()
-        g.moveTo(x, s)
-        g.lineTo(x + 16, s)
-        g.lineTo(x + 46, s * 0.84)
-        g.lineTo(x + 30, s * 0.84)
-        g.fill()
-      }
-    })
-    OBSTACLES.forEach((o, i) => {
-      const g = new THREE.Group()
-      const tex = metalTex.clone()
-      tex.needsUpdate = true
-      tex.repeat.set((o.hw * 2) / 8, 1)
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(o.hw * 2, o.h, o.hd * 2),
-        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45, metalness: 0.8 }),
-      )
-      body.position.y = o.h / 2
-      body.castShadow = body.receiveShadow = true
-      g.add(body)
-      const neon = new THREE.MeshBasicMaterial({ color: i % 2 ? 0xe879f9 : 0x38bdf8 })
-      const trim = new THREE.Mesh(new THREE.BoxGeometry(o.hw * 2 + 0.5, 0.6, o.hd * 2 + 0.5), neon)
-      trim.position.y = o.h
-      g.add(trim)
-      for (const s of [-1, 1]) {
-        for (const f of [1, -1]) {
-          const st = new THREE.Mesh(new THREE.BoxGeometry(0.4, o.h * 0.6, 0.2), neon)
-          st.position.set(s * o.hw * 0.6, o.h * 0.55, f * (o.hd + 0.1))
-          g.add(st)
-        }
-      }
-      const core = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.5, 1.5, 1.2, 12),
-        new THREE.MeshStandardMaterial({ color: 0x111827, emissive: i % 2 ? 0xe879f9 : 0x38bdf8, emissiveIntensity: 1.5 }),
-      )
-      core.position.y = o.h + 0.9
-      g.add(core)
-      g.position.set(o.x, 0, o.z)
-      scene.add(g)
-    })
+    /* ---------- obstacles: CONEX containers ---------- */
+    this.buildContainers(scene)
 
-    /* ---------- dust ---------- */
+    /* ---------- dust motes in the low sun ---------- */
     const dg = new THREE.BufferGeometry()
     const dp = new Float32Array(1800)
     for (let i = 0; i < 1800; i += 3) {
@@ -293,10 +219,10 @@ export class World {
       dp[i + 2] = (Math.random() - 0.5) * 200
     }
     dg.setAttribute('position', new THREE.BufferAttribute(dp, 3))
-    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x7dd3fc, size: 0.5, transparent: true, opacity: 0.55, depthWrite: false }))
+    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xd8c8a8, size: 0.5, transparent: true, opacity: 0.4, depthWrite: false }))
     scene.add(this.dust)
 
-    this.disposables.push(skyTex, floorTex, decalTex, metalTex, dark)
+    this.disposables.push(skyTex, floorTex, padTex)
 
     /* ---------- hero skyline (artist building model) ---------- */
     this.offAssetsReady = assets.onReady(() => this.addHeroBuildings(scene))
@@ -304,7 +230,7 @@ export class World {
 
   /**
    * A ring of the artist-authored building model breaks up the procedural
-   * city with real architecture — placed deterministically outside the arena.
+   * base with real architecture — placed deterministically outside the fence.
    */
   private addHeroBuildings(scene: THREE.Scene): void {
     if (this.heroAdded) return
@@ -312,7 +238,7 @@ export class World {
     if (!tpl) return
     this.heroAdded = true
 
-    // Deterministic scatter on a ring outside the barrier (LCG, fixed seed).
+    // Deterministic scatter on a ring outside the fence (LCG, fixed seed).
     let rngState = 0x9e3779b9
     const rand = (): number => {
       rngState = (Math.imul(rngState, 1664525) + 1013904223) >>> 0
@@ -343,7 +269,7 @@ export class World {
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         for (const m of mats) {
           const std = m as THREE.MeshStandardMaterial
-          if (std.isMeshStandardMaterial) std.envMapIntensity = 0.9
+          if (std.isMeshStandardMaterial) std.envMapIntensity = 0.6
         }
       }
     })
@@ -352,90 +278,273 @@ export class World {
   }
 
   /**
-   * Procedural city on a street grid — but unlike the original (which drew
-   * ~270 separate meshes), each building's UVs are baked at build time so the
-   * entire city merges into 3 draw calls: buildings, neon bands, pillars.
+   * The base beyond the fence — but unlike the old neon city (~270 separate
+   * meshes), each building's UVs are baked at build time so the entire base
+   * merges into a handful of draw calls. Everything is sun-lit standard
+   * material: barracks with dark window bands, a hangar, a water tower and
+   * two watchtowers as small groups, then treeline and hills merged.
    */
-  private buildCity(scene: THREE.Scene): void {
-    const winTex = makeTexture(128, (g, s) => {
-      g.fillStyle = '#04060d'
+  private buildBase(scene: THREE.Scene): void {
+    const wallTex = makeTexture(128, (g, s) => {
+      g.fillStyle = C.barracksWall
       g.fillRect(0, 0, s, s)
-      const colors = ['#7dd3fc', '#f0abfc', '#fde68a', '#a5b4fc']
-      for (let y = 4; y < s; y += 12) {
-        for (let x = 4; x < s; x += 12) {
-          if (Math.random() < 0.38) {
-            g.fillStyle = colors[(Math.random() * 4) | 0]
-            g.fillRect(x, y, 7, 8)
-          }
+      // Subtle panel seams
+      g.strokeStyle = 'rgba(60, 56, 46, 0.25)'
+      g.lineWidth = 2
+      for (let y = 24; y < s; y += 28) {
+        g.beginPath(); g.moveTo(0, y); g.lineTo(s, y); g.stroke()
+      }
+      // Dark window band (daytime glass)
+      g.fillStyle = C.windowGlass
+      for (let y = 40; y < s - 30; y += 44) {
+        for (let x = 8; x < s - 14; x += 26) {
+          g.fillRect(x, y, 16, 20)
         }
       }
     }, 1)
-    const buildingGeos: THREE.BufferGeometry[] = []
-    const bandGeos: THREE.BufferGeometry[] = []
-    const pillarGeos: THREE.BufferGeometry[] = []
-    const pillarColors: number[] = []
-    const bandColors: number[] = []
-    const NEON = [0x22d3ee, 0xe879f9, 0xfacc15, 0x818cf8]
-    const tmpColor = new THREE.Color()
+    const roofMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(C.roofGray), roughness: 0.9 })
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.85 })
 
+    /* Barracks: long low buildings on a street grid, merged. */
+    const barracksGeos: THREE.BufferGeometry[] = []
+    const roofGeos: THREE.BufferGeometry[] = []
     for (let gx = -5; gx <= 5; gx++) {
       for (let gz = -5; gz <= 5; gz++) {
         const cx = gx * 48
         const cz = gz * 48
-        if (Math.max(Math.abs(cx), Math.abs(cz)) < ARENA + 36 || Math.random() < 0.2) continue
-        const w = 20 + Math.random() * 14
-        const d = 20 + Math.random() * 14
-        const h = 40 + Math.random() * 70 + Math.hypot(cx, cz) * 0.25
-        // Bake per-building texture density into UVs (single shared material).
+        if (Math.max(Math.abs(cx), Math.abs(cz)) < ARENA + 40 || Math.random() < 0.25) continue
+        const w = 24 + Math.random() * 10
+        const d = 12 + Math.random() * 6
+        const h = 9 + Math.random() * 5
         const geo = new THREE.BoxGeometry(w, h, d)
+        // Bake window density into UVs (single shared material).
         const uv = geo.attributes.uv as THREE.BufferAttribute
-        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 9), uv.getY(i) * (h / 9))
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 12), uv.getY(i) * (h / 12))
         geo.translate(cx, h / 2, cz)
-        buildingGeos.push(geo)
-        // Neon base band (vertex-colored).
-        const band = new THREE.BoxGeometry(w + 1, 0.7, d + 1)
-        band.translate(cx, 0.35, cz)
-        tmpColor.setHex(NEON[(gx + gz + 10) % 4]!)
-        const count = band.attributes.position.count
-        for (let i = 0; i < count; i++) bandColors.push(tmpColor.r, tmpColor.g, tmpColor.b)
-        bandGeos.push(band)
-        // Light pillar on one corner.
-        const ph = h * (0.4 + Math.random() * 0.5)
-        const pil = new THREE.BoxGeometry(1.2, ph, 1.2)
-        pil.translate(cx - Math.sign(cx || 1) * w / 2, 4 + ph / 2, cz - Math.sign(cz || 1) * d / 2)
-        const pcount = pil.attributes.position.count
-        for (let i = 0; i < pcount; i++) pillarColors.push(tmpColor.r, tmpColor.g, tmpColor.b)
-        pillarGeos.push(pil)
+        barracksGeos.push(geo)
+        const roof = new THREE.BoxGeometry(w + 1.4, 0.8, d + 1.4)
+        roof.translate(cx, h + 0.4, cz)
+        roofGeos.push(roof)
       }
     }
-
-    if (buildingGeos.length) {
-      const buildings = new THREE.Mesh(
-        mergeGeometries(buildingGeos)!,
-        new THREE.MeshBasicMaterial({ map: winTex, color: 0xaab4d8 }),
-      )
-      scene.add(buildings)
-      const bands = new THREE.Mesh(
-        mergeGeometries(bandGeos)!,
-        new THREE.MeshBasicMaterial({ vertexColors: true }),
-      )
-      scene.add(bands)
-      const pillars = new THREE.Mesh(
-        mergeGeometries(pillarGeos)!,
-        new THREE.MeshBasicMaterial({ vertexColors: true }),
-      )
-      scene.add(pillars)
-      for (const g of [...buildingGeos, ...bandGeos, ...pillarGeos]) g.dispose()
+    if (barracksGeos.length) {
+      scene.add(new THREE.Mesh(mergeGeometries(barracksGeos)!, wallMat))
+      scene.add(new THREE.Mesh(mergeGeometries(roofGeos)!, roofMat))
+      for (const g of [...barracksGeos, ...roofGeos]) g.dispose()
     }
-    this.disposables.push(winTex)
+    this.disposables.push(wallTex)
+
+    /* Hangar: half-cylinder, open end toward the range. */
+    const hangarMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(C.roofGray), roughness: 0.7, metalness: 0.3 })
+    for (const [x, z, ry] of [[-150, -95, 0.6], [140, 110, 2.4] as const]) {
+      const hangar = new THREE.Group()
+      const shell = new THREE.Mesh(new THREE.CylinderGeometry(16, 16, 52, 24, 1, false, 0, Math.PI), hangarMat)
+      shell.rotation.z = Math.PI / 2
+      shell.rotation.y = Math.PI / 2
+      shell.position.y = 0.1
+      shell.castShadow = true
+      hangar.add(shell)
+      hangar.position.set(x, 0, z)
+      hangar.rotation.y = ry
+      scene.add(hangar)
+    }
+
+    /* Water tower + watchtowers: small steel groups. */
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x5b5e52, roughness: 0.55, metalness: 0.65 })
+    {
+      const tower = new THREE.Group()
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 9, 14), hangarMat)
+      tank.position.y = 26
+      tank.castShadow = true
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(7.6, 4, 14), roofMat)
+      cone.position.y = 32.5
+      tower.add(tank, cone)
+      for (const [lx, lz] of [[-4.5, -4.5], [4.5, -4.5], [-4.5, 4.5], [4.5, 4.5]] as const) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(1, 22, 1), steelMat)
+        leg.position.set(lx, 11, lz)
+        tower.add(leg)
+      }
+      tower.position.set(-120, 0, 130)
+      scene.add(tower)
+    }
+    for (const [x, z] of [[130, -130], [-140, -60] as const]) {
+      const wt = new THREE.Group()
+      for (const [lx, lz] of [[-2.2, -2.2], [2.2, -2.2], [-2.2, 2.2], [2.2, 2.2]] as const) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.7, 17, 0.7), steelMat)
+        leg.position.set(lx, 8.5, lz)
+        wt.add(leg)
+      }
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(6.4, 4, 6.4), wallMat)
+      cabin.position.y = 19
+      cabin.castShadow = true
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(5, 2.4, 4), roofMat)
+      roof.position.y = 22.4
+      roof.rotation.y = Math.PI / 4
+      wt.add(cabin, roof)
+      wt.position.set(x, 0, z)
+      scene.add(wt)
+    }
+
+    /* Treeline: irregular dark band ringing the compound, merged. */
+    const treeGeos: THREE.BufferGeometry[] = []
+    for (let i = 0; i < 90; i++) {
+      const angle = (i / 90) * Math.PI * 2 + Math.random() * 0.06
+      const dist = 175 + Math.random() * 70
+      const w = 9 + Math.random() * 12
+      const h = 10 + Math.random() * 13
+      const b = new THREE.BoxGeometry(w, h, w * (0.7 + Math.random() * 0.5))
+      b.translate(Math.cos(angle) * dist, h / 2, Math.sin(angle) * dist)
+      treeGeos.push(b)
+    }
+    const trees = new THREE.Mesh(
+      mergeGeometries(treeGeos)!,
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(C.tree), roughness: 1 }),
+    )
+    scene.add(trees)
+    for (const g of treeGeos) g.dispose()
+
+    /* Distant hazy hills. */
+    const hillGeos: THREE.BufferGeometry[] = []
+    for (let i = 0; i < 14; i++) {
+      const angle = (i / 14) * Math.PI * 2 + Math.random() * 0.3
+      const dist = 380 + Math.random() * 170
+      const r = 90 + Math.random() * 130
+      const h = 45 + Math.random() * 70
+      const cone = new THREE.ConeGeometry(r, h, 7)
+      cone.translate(Math.cos(angle) * dist, h / 2 - 6, Math.sin(angle) * dist)
+      hillGeos.push(cone)
+    }
+    const hills = new THREE.Mesh(
+      mergeGeometries(hillGeos)!,
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(C.hill), roughness: 1 }),
+    )
+    scene.add(hills)
+    for (const g of hillGeos) g.dispose()
+  }
+
+  /** Chain-link perimeter: alpha-tested mesh on posts with a concrete curb. */
+  private buildFence(scene: THREE.Scene): void {
+    const linkTex = makeTexture(128, (g, s) => {
+      g.clearRect(0, 0, s, s)
+      g.strokeStyle = 'rgba(140, 142, 130, 0.95)'
+      g.lineWidth = 3
+      // Diamond weave
+      for (let i = -s; i < s * 2; i += 16) {
+        g.beginPath(); g.moveTo(i, 0); g.lineTo(i + s, s); g.stroke()
+        g.beginPath(); g.moveTo(i, s); g.lineTo(i + s, 0); g.stroke()
+      }
+    }, 1)
+    const postMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(C.steelPost), roughness: 0.5, metalness: 0.75 })
+    const curbMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(C.concrete), roughness: 0.95 })
+    const FENCE_H = 5.4
+    const SIDES = [[0, -ARENA, 0], [0, ARENA, 0], [ARENA, 0, Math.PI / 2], [-ARENA, 0, Math.PI / 2]] as const
+    for (const [x, z, ry] of SIDES) {
+      const g = new THREE.Group()
+      g.position.set(x, 0, z)
+      g.rotation.y = ry
+      scene.add(g)
+      // Concrete curb
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(ARENA * 2, 1.1, 1.6), curbMat)
+      curb.position.y = 0.55
+      curb.receiveShadow = true
+      g.add(curb)
+      // Chain-link mesh (texture repeats along its length)
+      const tex = linkTex.clone()
+      tex.needsUpdate = true
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+      tex.repeat.set(ARENA * 2 / 6, 1)
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(ARENA * 2, FENCE_H),
+        new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.5, metalness: 0.8, color: 0xb9bbae }),
+      )
+      mesh.position.y = 1.1 + FENCE_H / 2
+      g.add(mesh)
+      // Top rail
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, ARENA * 2, 6), postMat)
+      rail.rotation.z = Math.PI / 2
+      rail.position.y = 1.1 + FENCE_H
+      g.add(rail)
+    }
+    // Posts every 12 units along each side (instanced)
+    const perSide = Math.ceil((ARENA * 2) / 12) + 1
+    const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.35, FENCE_H + 1.4, 0.35), postMat, perSide * 4)
+    const mt = new THREE.Matrix4()
+    let n = 0
+    for (let i = 0; i < perSide; i++) {
+      const o = -ARENA + i * 12
+      for (const [px, pz] of [[o, -ARENA], [o, ARENA], [-ARENA, o], [ARENA, o]] as const) {
+        mt.makeTranslation(px, (FENCE_H + 1.4) / 2, pz)
+        posts.setMatrixAt(n, mt)
+        n++
+      }
+    }
+    posts.castShadow = true
+    scene.add(posts)
+    this.disposables.push(linkTex)
+  }
+
+  /** CONEX shipping containers: corrugated steel with stencil markings. */
+  private buildContainers(scene: THREE.Scene): void {
+    const STENCILS = ['ORDNANCE', '5.56 MM', 'SUPPLY', 'AMMO LOT 7', 'RATIONS', 'SPARES'] as const
+    OBSTACLES.forEach((o, i) => {
+      const olive = i % 2 === 0
+      const base = olive ? C.olive : C.rust
+      const tex = makeTexture(256, (g, s) => {
+        g.fillStyle = base
+        g.fillRect(0, 0, s, s)
+        // Corrugation ridges
+        for (let x = 0; x < s; x += 16) {
+          g.fillStyle = 'rgba(255, 250, 230, 0.06)'
+          g.fillRect(x, 0, 7, s)
+          g.fillStyle = 'rgba(12, 14, 10, 0.22)'
+          g.fillRect(x + 7, 0, 3, s)
+        }
+        // Wear + rust patches
+        for (let k = 0; k < 40; k++) {
+          g.fillStyle = `rgba(30, 24, 16, ${0.04 + Math.random() * 0.08})`
+          g.fillRect(Math.random() * s, Math.random() * s, 3 + Math.random() * 10, 2 + Math.random() * 6)
+        }
+        // Stencil marking
+        g.save()
+        g.translate(s / 2, s * 0.36)
+        g.fillStyle = 'rgba(235, 229, 210, 0.85)'
+        g.font = '700 34px "Big Shoulders Stencil Display", "Barlow Condensed", "Arial Narrow", sans-serif'
+        g.textAlign = 'center'
+        g.textBaseline = 'middle'
+        g.fillText(STENCILS[i % STENCILS.length]!, 0, 0)
+        g.restore()
+        // Hazard stripe on the lower edge
+        g.fillStyle = C.hazard
+        g.fillRect(0, s * 0.86, s, 6)
+        g.fillStyle = C.hazardDark
+        for (let x = -s; x < s * 2; x += 28) {
+          g.beginPath()
+          g.moveTo(x, s)
+          g.lineTo(x + 14, s)
+          g.lineTo(x + 38, s * 0.86)
+          g.lineTo(x + 24, s * 0.86)
+          g.fill()
+        }
+      })
+      tex.repeat.set(Math.max(1, Math.round((o.hw * 2) / 12)), 1)
+      const g = new THREE.Group()
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(o.hw * 2, o.h, o.hd * 2),
+        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.35 }),
+      )
+      body.position.y = o.h / 2
+      body.castShadow = body.receiveShadow = true
+      g.add(body)
+      g.position.set(o.x, 0, o.z)
+      scene.add(g)
+    })
   }
 
   update(dt: number, px: number, pz: number, cameraPos: THREE.Vector3): void {
-    this.barrierMat.uniforms.t.value += dt
-    ;(this.barrierMat.uniforms.pp.value as THREE.Vector3).set(px, 0, pz)
     this.dust.rotation.y += dt * 0.01
     this.sky.position.copy(cameraPos)
-    this.keyLight.position.set(px + 30, 70, pz + 40)
+    // Low western sun: constant direction relative to the player (shadow follows).
+    this.keyLight.position.set(px - 85, 48, pz + 32)
     this.keyLight.target.position.set(px, 0, pz)
     this.playerLight.position.set(px, 6, pz)
   }
@@ -453,6 +562,5 @@ export class World {
   dispose(): void {
     this.offAssetsReady()
     for (const d of this.disposables) d.dispose()
-    this.barrierMat.dispose()
   }
 }

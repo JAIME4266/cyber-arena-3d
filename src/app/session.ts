@@ -47,7 +47,7 @@ interface EnemyView {
 }
 
 const BULLET_GEO = new THREE.BoxGeometry(0.5, 0.5, 2.6)
-const BULLET_MAT = new THREE.MeshBasicMaterial({ color: 0xff2a55 })
+const BULLET_MAT = new THREE.MeshBasicMaterial({ color: 0xd8542a })
 
 export class Session {
   private readonly cfg: SessionConfig
@@ -236,7 +236,7 @@ export class Session {
     this.playerActors[this.localId]?.shoot()
     const from = this.playerActors[this.localId]?.muzzle() ?? new THREE.Vector3()
     this.vfx.showBeam(from, new THREE.Vector3(target.x, KINDS[target.kind].scale * 5, target.z), 0.12)
-    this.vfx.sparkBurst(target.x, 3, target.z, 0x38bdf8, 10, 1)
+    this.vfx.sparkBurst(target.x, 3, target.z, 0xffd9a0, 10, 1)
   }
 
   /* ------------------------------------------------ loop ------------------------------------------------ */
@@ -397,7 +397,7 @@ export class Session {
         this.cfg.audio.sfx('boom')
         if (e.milestone) {
           this.cfg.audio.sfx('wave')
-          this.vfx.text(`CYBER SURGE: ${this.lastKillCount(e)} KILLS`, e.x, 6, e.z)
+          this.vfx.text(`HOT STREAK: ${this.lastKillCount(e)} KILLS`, e.x, 6, e.z)
         } else if (e.by === local) {
           this.vfx.text(KILL_MSGS[(Math.random() * KILL_MSGS.length) | 0], e.x, 5, e.z)
         }
@@ -435,23 +435,23 @@ export class Session {
       case 'wave': {
         this.cfg.audio.sfx('wave')
         const p = vm?.players[0]
-        this.vfx.text(e.w === 2 ? 'WAVE 2: ELITE HOSTILES' : 'WAVE UP', p?.x ?? 0, 9, p?.z ?? 0)
+        this.vfx.text(e.w === 2 ? 'WAVE 2: GUNNERS INBOUND' : 'WAVE UP', p?.x ?? 0, 9, p?.z ?? 0)
         break
       }
       case 'boss': {
         this.cfg.audio.sfx('boss')
-        this.vfx.text('OVERLORD CORE ONLINE', 0, 14, -20)
+        this.vfx.text('JUGGERNAUT INBOUND', 0, 14, -20)
         break
       }
       case 'bossphase': {
         this.cfg.audio.sfx('boss')
-        this.vfx.text(`OVERLORD PHASE ${e.phase}`, 0, 14, -20)
+        this.vfx.text(`JUGGERNAUT PHASE ${e.phase}`, 0, 14, -20)
         this.vfx.addShake(0.5)
         break
       }
       case 'pickup': {
         this.cfg.audio.sfx('pickup')
-        this.vfx.text('+1 SHIELD', e.x, 5, e.z)
+        this.vfx.text('+1 ARMOR', e.x, 5, e.z)
         break
       }
       case 'shot': {
@@ -649,14 +649,19 @@ export class Session {
 
   private syncPickups(vm: ViewModel, dt: number): void {
     while (this.pickupPool.length < vm.pickups.length) {
+      // Med kit: white crate with a red cross — reads instantly at range.
       const g = new THREE.Group()
-      const mat = new THREE.MeshBasicMaterial({ color: 0x22e5ff })
-      const a = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.35, 6), mat)
-      a.rotation.z = Math.PI / 2
-      const b = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.14, 8, 24), mat)
-      b.rotation.y = Math.PI / 2
-      g.add(a, b)
-      g.scale.setScalar(1.25)
+      const boxMat = new THREE.MeshStandardMaterial({ color: 0xe9e4d2, roughness: 0.6 })
+      const crossMat = new THREE.MeshBasicMaterial({ color: 0xc0392b })
+      const a = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 2.2), boxMat)
+      const c1 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.22, 2.25), crossMat)
+      c1.position.y = 0.5
+      const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.1, 2.25), crossMat)
+      c2.position.y = 0.35
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.22, 2.35), boxMat)
+      lid.position.y = 0.85
+      g.add(a, c1, c2, lid)
+      g.scale.setScalar(1.05)
       this.renderer().scene.add(g)
       this.pickupPool.push(g)
     }
@@ -680,15 +685,16 @@ export class Session {
       for (const g of this.bubbleMeshes) g.removeFromParent()
       this.bubbleMeshes.length = 0
       vm.bubbles.forEach((b, i) => {
-        const col = i % 2 ? 0xa855f7 : 0x34d399
+        // Gas hazard: yellow-green haze dome with a painted ground ring.
+        const col = i % 2 ? 0x9aa137 : 0x7f8c2c
         const g = new THREE.Group()
         const dome = new THREE.Mesh(
           new THREE.SphereGeometry(b.r, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
-          new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }),
+          new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
         )
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(b.r - 0.7, b.r, 48),
-          new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }),
+          new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }),
         )
         ring.rotation.x = -Math.PI / 2
         ring.position.y = 0.15
@@ -736,7 +742,7 @@ export class Session {
 
   retry(): void {
     if (this.cfg.mode === 'coop-guest') {
-      this.screens.toast('ONLY THE HOST CAN REBOOT A CO-OP RUN', 'info')
+      this.screens.toast('ONLY THE HOST CAN RESTART A SQUAD RUN', 'info')
       return
     }
     this.screens.hideGameOver()

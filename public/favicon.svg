@@ -1,11 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#22d3ee"/>
-      <stop offset="1" stop-color="#e879f9"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" fill="#05070f"/>
-  <path d="M32 6 L54 19 L54 45 L32 58 L10 45 L10 19 Z" fill="none" stroke="url(#g)" stroke-width="4"/>
-  <path d="M22 40 L32 22 L42 40 M26 33 H38" stroke="#22d3ee" stroke-width="4" fill="none" stroke-linecap="square"/>
+  <!-- RANGE HOT: dark placard + safety-orange range flag pennant -->
+  <rect x="2" y="2" width="60" height="60" fill="#22241f" stroke="#565a4a" stroke-width="2"/>
+  <rect x="7" y="7" width="50" height="50" fill="none" stroke="#3a3d33" stroke-width="1"/>
+  <line x1="22" y1="14" x2="22" y2="50" stroke="#e6e0cf" stroke-width="4"/>
+  <path d="M26 16 L52 22 L26 30 Z" fill="#e8742c"/>
+  <rect x="14" y="42" width="20" height="5" fill="#e6e0cf"/>
 </svg>

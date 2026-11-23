@@ -1,12 +1,25 @@
 /**
- * Floating letter labels above enemies. Canvas-rendered, with an LRU texture
- * cache keyed by (sequence, progress, locked) — no per-keystroke allocation.
+ * Floating target placards above enemies: stenciled plates with corner
+ * rivets — the range signage of the RANGE HOT theme. Canvas-rendered, with an
+ * LRU texture cache keyed by (sequence, progress, locked) — no per-keystroke
+ * allocation.
  */
 import * as THREE from 'three'
 import { ACTOR_H, KINDS } from '../core/constants'
 import type { EnemyKind } from '../core/constants'
 
 const CACHE_MAX = 96
+
+/** Theme colors (DESIGN.md §4) — hex form for canvas 2D. */
+const PLATE_BG = 'rgba(24, 26, 21, 0.95)'
+const PLATE_EDGE = 'rgba(232, 226, 208, 0.9)'
+const PLATE_EDGE_LOCKED = 'rgba(240, 130, 50, 0.95)'
+const RIVET = 'rgba(140, 144, 120, 0.9)'
+const CHAR_DONE = '#a3c477'
+const CHAR_CURRENT = '#ffffff'
+const CHAR_CURRENT_LOCKED = '#f58840'
+const CHAR_TODO = 'rgba(205, 200, 180, 0.72)'
+const TICK = '#e8742c'
 
 export class LabelSystem {
   private readonly cache = new Map<string, THREE.CanvasTexture>()
@@ -27,24 +40,35 @@ export class LabelSystem {
     cv.width = 512
     cv.height = 160
     const g = cv.getContext('2d')!
-    g.fillStyle = locked ? 'rgba(6,14,32,.95)' : 'rgba(10,16,30,.82)'
-    g.strokeStyle = locked ? '#38bdf8' : 'rgba(255,255,255,.35)'
-    g.lineWidth = 8
+    // Steel plate
+    g.fillStyle = PLATE_BG
+    g.strokeStyle = locked ? PLATE_EDGE_LOCKED : PLATE_EDGE
+    g.lineWidth = 6
     g.beginPath()
-    if (typeof g.roundRect === 'function') g.roundRect(20, 10, 472, 112, 22)
-    else g.rect(20, 10, 472, 112)
+    g.rect(22, 12, 468, 108)
     g.fill()
     g.stroke()
-    g.fillStyle = locked ? '#ff3b5c' : 'rgba(255,59,92,.5)'
-    g.fillRect(140, 134, 232, 10)
-    g.font = 'bold 64px monospace'
+    // Corner rivets
+    g.fillStyle = RIVET
+    for (const [rx, ry] of [[40, 30], [472, 30], [40, 102], [472, 102]] as const) {
+      g.beginPath()
+      g.arc(rx, ry, 4, 0, 7)
+      g.fill()
+    }
+    // Stenciled sequence
+    g.font = '700 88px "Barlow Condensed", "Arial Narrow", sans-serif'
     g.textAlign = 'center'
     g.textBaseline = 'middle'
     const chars = [...seq].map(c => (c === ' ' ? '␣' : c))
     const sx = 256 - ((chars.length - 1) * 72) / 2
     chars.forEach((c, i) => {
-      g.fillStyle = i < ti ? '#22c55e' : i === ti ? (locked ? '#38bdf8' : '#fff') : 'rgba(148,163,184,.5)'
-      g.fillText(c, sx + i * 72, 68)
+      const cur = i === ti
+      g.fillStyle = i < ti ? CHAR_DONE : cur ? (locked ? CHAR_CURRENT_LOCKED : CHAR_CURRENT) : CHAR_TODO
+      g.fillText(c, sx + i * 72, 64)
+      if (cur) {
+        g.fillStyle = TICK
+        g.fillRect(sx + i * 72 - 16, 106, 32, 8)
+      }
     })
     const tex = new THREE.CanvasTexture(cv)
     tex.minFilter = THREE.LinearFilter
@@ -73,7 +97,7 @@ export class LabelSystem {
       })
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.875), mat)
       mesh.renderOrder = 10
-      mesh.scale.setScalar(kind === 'BOSS' ? 2.2 : 1.3)
+      mesh.scale.setScalar(kind === 'BOSS' ? 2.45 : 1.55)
       entry = { mesh, mat, key: '' }
       this.labels.set(id, entry)
       this.scene.add(mesh)

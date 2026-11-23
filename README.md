@@ -1,11 +1,15 @@
-# CYBER ARENA 3D — REDEFINED
+# RANGE HOT — LIVE-FIRE TYPING RANGE
 
-A typing-combat arena shooter. Enemies close in — you kill them by typing the 
-letters above their heads while running, jumping and dashing around a neon
-cyberpunk grid. Built as a fully static site: **no backend, no accounts, no
-API keys** — deployed on GitHub Pages with serverless P2P co-op.
+A real-world typing arena shooter. Hostiles close in — you put them down by
+typing the letters stenciled on the plates above their heads while running,
+jumping and sprinting around a live-fire training compound at golden hour.
+Built as a fully static site: **no backend, no accounts, no API keys** —
+deployed on GitHub Pages with serverless P2P squad co-op.
 
 **Play:** `https://jaime-sinclair.github.io/cyber-arena-3d/`
+
+> Visual design system: see [`DESIGN.md`](./DESIGN.md) — stenciled steel
+> placards, safety orange, hazard tape on danger only. No neon, no cyberpunk.
 
 ---
 
@@ -13,28 +17,29 @@ API keys** — deployed on GitHub Pages with serverless P2P co-op.
 
 | Mode | What it is |
 |---|---|
-| **Solo Run** | Endless arena. New seed every run. |
-| **Daily Challenge** | Everyone gets the same seed per date — compare score, WPM, accuracy. |
+| **Solo Drill** | Free range, endless. New seed every run. |
+| **Daily Drill** | Everyone gets the same seed per date — compare score, WPM, accuracy. |
 | **Seed Link** | `?seed=XYZ` — challenge a friend on an identical run layout. |
-| **Co-op (P2P)** | Create a room, share the 6-char code, play the same arena together over a direct browser-to-browser WebRTC connection. No server involved. |
+| **Squad (P2P)** | Host a room, share the 6-char code, fight the same range together over a direct browser-to-browser WebRTC connection. No server involved. |
 
 ## Controls
 
 - **Move** — Arrow keys
 - **Shoot** — Type home-row keys: `A S D F G H J K L ; ' ,`
-- **Jump** — Space (dodge low bullets and shockwaves)
-- **Dash** — Shift (short burst with brief invulnerability)
-- **Pause** — Esc (solo only; co-op runs stay live)
+- **Jump** — Space (dodge low rounds and blast waves)
+- **Sprint** — Shift (short burst with brief invulnerability)
+- **Pause** — Esc (solo only; squad runs stay live)
 
 ## Rules
 
-- Correct keys build **COMBO**. A miss or getting hit breaks it.
-- Combo **overclocks you**: faster movement, multiplied score.
-- **THREAT** ramps with kills — the arena gets meaner.
-- Wave 2 at 50 kills: Elites with lasers (jump them — they fly low).
-- Wave 3 at 100 kills: the **Overlord Core** boss with 3 phases —
-  shockwaves, bullet rings, aimed volleys and grunt reinforcements.
-- Green EMP domes halve your speed. Yellow cells restore shields.
+- Correct keys build a **STREAK**. A miss or getting hit breaks it.
+- The streak feeds **ADRENALINE**: faster movement, multiplied score.
+- **THREAT** ramps with kills — the range gets meaner.
+- Wave 2 at 50 kills: Gunners firing low rounds (jump them) that need 2-key
+  sequences.
+- Wave 3 at 100 kills: the **JUGGERNAUT** with 3 phases — blast waves,
+  bullet rings, aimed volleys and grunt reinforcements.
+- Yellow-green GAS domes halve your speed. White MED KITS restore armor plates.
 
 ## Architecture
 
@@ -48,7 +53,8 @@ src/
     stats.ts      WPM / accuracy / ranks / daily seeds
   render/   three.js presentation
     renderer.ts   sRGB + ACES + bloom pipeline, SwiftShader-safe quality
-    world.ts      Arena, GLSL energy barrier, merged-geometry city (~3 draws)
+    world.ts      Training compound: asphalt range, helipad, chain-link fence,
+                  CONEX containers, base backdrop, treeline + hills (~few draws)
     assets.ts     HD asset library: meshopt GLB pack, byte progress,
                   per-file fallback, onReady hot-swap hooks
     actor.ts      Procedural 11-bone rigged characters w/ hand-written skin
@@ -62,8 +68,8 @@ src/
     audio.ts      WebAudio SFX + layered procedural soundtrack (intensity
                   scales with combo — no audio files, ever)
     hud.ts        Dirty-checked DOM HUD
-  ui/       Menu, overlays, settings (plain DOM, keyboard accessible)
-  net/      Serverless co-op — connection hub with racing transports
+  ui/       Menu (range board), overlays, settings (plain DOM, a11y, DESIGN.md tokens)
+  net/      Serverless squad co-op — connection hub with racing transports
     hub.ts        Races 3 signaling networks, deterministic pinning, failover
     strategies.ts Nostr relays + WebTorrent trackers + MQTT brokers (curated)
     room.ts       One Trystero strategy wrapped as a routed transport
@@ -173,5 +179,6 @@ build, kept for reference.
 ## Credits
 
 - Original concept, first build, and the artist models: **Jaime Sinclair**
-- Elite rebuild: deterministic engine, HD asset pipeline + procedural Mixamo
-  animation, P2P co-op, CI/CD, tests — 2026
+- Elite rebuild (2026) and the RANGE HOT real-world redesign: deterministic
+  engine, HD asset pipeline + procedural Mixamo animation, P2P co-op, CI/CD,
+  tests

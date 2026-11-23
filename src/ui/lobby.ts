@@ -32,10 +32,10 @@ const STRATEGY_LABELS: Record<string, string> = {
 function phaseLine(s: NetStatus): string {
   switch (s.phase) {
     case 'booting':
-      return 'LINKING SIGNAL NETWORKS…'
+      return 'CONNECTING SIGNALING NETWORKS…'
     case 'signaling':
     case 'rescan':
-      return `SCANNING FOR PARTNER · ROUND ${s.attempt}`
+      return `SEARCHING FOR PARTNER · ROUND ${s.attempt}`
     case 'peer-found':
       return 'PARTNER FOUND — LINKING'
     case 'connected':
@@ -72,7 +72,7 @@ export class CoopLobby {
     this.isHost = isHost
     const { card, close, dismiss } = overlayCard(
       parent,
-      isHost ? 'CO-OP ROOM CREATED' : 'JOINING CO-OP ROOM',
+      isHost ? 'SQUAD ROOM READY' : 'JOINING SQUAD ROOM',
       onExit,
     )
     this.card = card
@@ -94,7 +94,7 @@ export class CoopLobby {
     this.body.append(this.note)
 
     if (isHost) {
-      this.launchBtn = button('btn magenta', 'LAUNCH CO-OP RUN')
+      this.launchBtn = button('btn primary', 'LAUNCH SQUAD RUN')
       this.launchBtn.disabled = true
       this.launchBtn.addEventListener('click', () => {
         if (this.launchBtn?.disabled) return
@@ -114,7 +114,7 @@ export class CoopLobby {
     })
     actions.append(copy)
     if (isHost) {
-      const direct = button('btn amber', 'DIRECT LINK — NO RELAYS')
+      const direct = button('btn', 'DIRECT LINK — NO NETWORK')
       direct.addEventListener('click', () => this.onDirectInvite())
       actions.append(direct)
     }
@@ -144,7 +144,7 @@ export class CoopLobby {
       this.hintShown = true
       this.note.style.display = 'block'
       this.note.textContent =
-        'STILL SCANNING — CHECK THE CODE WITH THE HOST, OR ASK THEM FOR A DIRECT INVITE'
+        'STILL SEARCHING — CHECK THE CODE WITH THE HOST, OR ASK THEM FOR A DIRECT INVITE'
     }
   }
 
@@ -200,7 +200,7 @@ export class CoopLobby {
   showHostDirect(inviteCode: string): void {
     if (this.dead) return
     this.card.textContent = ''
-    this.card.append(el('h2', '', 'DIRECT LINK — NO RELAYS'))
+    this.card.append(el('h2', '', 'DIRECT LINK — NO NETWORK'))
     this.card.append(el('p', '', 'Works even when every signaling network is blocked. Send this invite to your friend with any messenger (WhatsApp, Discord, SMS):'))
     const out = document.createElement('textarea')
     out.className = 'direct-out'
@@ -209,7 +209,7 @@ export class CoopLobby {
     out.setAttribute('aria-label', 'Direct invite code')
     this.card.append(out)
     const row1 = el('div', 'row-actions')
-    const copy = button('btn amber', 'COPY INVITE')
+    const copy = button('btn', 'COPY INVITE')
     copy.addEventListener('click', () => {
       void navigator.clipboard?.writeText(inviteCode).then(
         () => this.setStatus('INVITE COPIED — SEND IT NOW', 'ok'),
@@ -229,7 +229,7 @@ export class CoopLobby {
     inp.setAttribute('aria-label', 'Friend reply code')
     this.card.append(inp)
     const row2 = el('div', 'row-actions')
-    const accept = button('btn magenta', 'ACCEPT REPLY')
+    const accept = button('btn primary', 'ACCEPT REPLY')
     accept.addEventListener('click', () => {
       const v = inp.value.trim()
       if (v.length === 0) {
@@ -256,7 +256,7 @@ export class CoopLobby {
     this.setStatus('PARTNER CONNECTED — READY', 'ok')
     if (this.directLaunch) this.directLaunch.disabled = false
     else {
-      const launch = button('btn magenta', 'LAUNCH CO-OP RUN')
+      const launch = button('btn primary', 'LAUNCH SQUAD RUN')
       launch.addEventListener('click', () => {
         if (launch.disabled) return
         this.started = true
@@ -291,10 +291,10 @@ export function coopJoinPrompt(
   cb: JoinPromptCallbacks,
   onClose: () => void,
 ): { dismiss: () => void } {
-  const { card, close, dismiss } = overlayCard(parent, 'JOIN CO-OP ROOM', onClose)
+  const { card, close, dismiss } = overlayCard(parent, 'JOIN SQUAD ROOM', onClose)
 
   const tabs = el('div', 'join-tabs')
-  const tabCode = button('join-tab on', 'ROOM CODE')
+  const tabCode = button('join-tab on', 'SQUAD CODE')
   const tabDirect = button('join-tab', 'DIRECT INVITE')
   tabs.append(tabCode, tabDirect)
   card.append(tabs)
@@ -309,7 +309,7 @@ export function coopJoinPrompt(
   input.setAttribute('aria-label', 'Room code')
   input.autocomplete = 'off'
   codePane.append(input)
-  const go = button('btn magenta', 'CONNECT')
+  const go = button('btn primary', 'CONNECT')
   go.addEventListener('click', () => cb.onCode(input.value.trim().toUpperCase()))
   const rowCode = el('div', 'row-actions')
   rowCode.append(go)
@@ -324,7 +324,7 @@ export function coopJoinPrompt(
   invite.placeholder = 'PASTE INVITE CODE HERE'
   invite.setAttribute('aria-label', 'Direct invite code')
   directPane.append(invite)
-  const useInvite = button('btn amber', 'GENERATE REPLY')
+  const useInvite = button('btn', 'GENERATE REPLY')
   const rowDirect = el('div', 'row-actions')
   rowDirect.append(useInvite)
   directPane.append(rowDirect)
@@ -375,7 +375,7 @@ export function directGuestWait(
   out.value = reply
   out.setAttribute('aria-label', 'Reply code')
   card.append(out)
-  const copy = button('btn amber', 'COPY REPLY')
+  const copy = button('btn', 'COPY REPLY')
   copy.addEventListener('click', () => {
     void navigator.clipboard?.writeText(reply).then(() => {
       copy.textContent = 'COPIED — SEND IT TO THE HOST'

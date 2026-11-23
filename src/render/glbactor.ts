@@ -30,10 +30,10 @@ interface RoleConfig {
 
 const ROLES: Record<GlbRole, RoleConfig> = {
   PLAYER: { template: 'player', scale: 1, gun: { key: 'gunRifle', lenFrac: 0.55 }, lean: 0.12, swing: 0.85, bob: 1, stepRate: 0.85, secondaryGain: 1 },
-  PLAYER2: { template: 'player', scale: 1, gun: { key: 'gunRifle', lenFrac: 0.55 }, lean: 0.12, swing: 0.85, bob: 1, stepRate: 0.85, tint: 0xd06bff, tintAmount: 0.35, secondaryGain: 1 },
+  PLAYER2: { template: 'player', scale: 1, gun: { key: 'gunRifle', lenFrac: 0.55 }, lean: 0.12, swing: 0.85, bob: 1, stepRate: 0.85, tint: 0xb0a070, tintAmount: 0.32, secondaryGain: 1 },
   RUNNER: { template: 'runner', scale: 0.82, lean: 0.26, swing: 1.2, bob: 1.1, stepRate: 1.05, secondaryGain: 1.1 },
   GRUNT: { template: 'grunt', scale: 1, lean: 0.1, swing: 0.9, bob: 0.95, stepRate: 0.8, secondaryGain: 1 },
-  ELITE: { template: 'grunt', scale: 1.15, gun: { key: 'gunSmg', lenFrac: 0.30 }, lean: 0.08, swing: 0.85, bob: 0.9, stepRate: 0.8, tint: 0xff3df0, tintAmount: 0.18, secondaryGain: 1 },
+  ELITE: { template: 'grunt', scale: 1.15, gun: { key: 'gunSmg', lenFrac: 0.30 }, lean: 0.08, swing: 0.85, bob: 0.9, stepRate: 0.8, tint: 0x9a5a2a, tintAmount: 0.18, secondaryGain: 1 },
   BOSS: { template: 'boss', scale: 2.3, lean: 0.16, swing: 0.6, bob: 1.5, stepRate: 0.62, secondaryGain: 1.4 },
 }
 

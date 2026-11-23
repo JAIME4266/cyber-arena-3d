@@ -31,7 +31,7 @@ test.describe('co-op P2P', () => {
     // Host creates a room, then switches to the direct flow.
     await hostPage.goto('/')
     await expect(hostPage.locator('#menu')).toBeVisible({ timeout: 30_000 })
-    await hostPage.locator('.btn', { hasText: 'CO-OP: CREATE ROOM' }).click()
+    await hostPage.locator('.btn', { hasText: 'SQUAD: HOST ROOM' }).click()
     await expect(hostPage.locator('.room-code')).toBeVisible()
     await hostPage.locator('.btn', { hasText: 'DIRECT LINK' }).click()
     const invite = await hostPage.locator('.direct-out').inputValue()
@@ -41,7 +41,7 @@ test.describe('co-op P2P', () => {
     // Guest pastes the invite and generates a reply.
     await guestPage.goto('/')
     await expect(guestPage.locator('#menu')).toBeVisible({ timeout: 30_000 })
-    await guestPage.locator('.btn', { hasText: 'CO-OP: JOIN ROOM' }).click()
+    await guestPage.locator('.btn', { hasText: 'SQUAD: JOIN ROOM' }).click()
     await guestPage.locator('.join-tab', { hasText: 'DIRECT INVITE' }).click()
     await guestPage.locator('.direct-in').fill(invite)
     await guestPage.locator('.btn', { hasText: 'GENERATE REPLY' }).click()
@@ -59,7 +59,7 @@ test.describe('co-op P2P', () => {
 
     // Host launches; both sides enter the run and the guest receives snapshots.
     // (Software renderers run the sim in slow motion — allow generous time.)
-    await hostPage.locator('.btn', { hasText: 'LAUNCH CO-OP RUN' }).click()
+    await hostPage.locator('.btn', { hasText: 'LAUNCH SQUAD RUN' }).click()
     await expect(hostPage.locator('#hud')).toBeVisible({ timeout: 30_000 })
     await expect(guestPage.locator('#hud')).toBeVisible({ timeout: 30_000 })
     await expect(guestPage.locator('#hud .hud-time')).not.toHaveText('00:00', { timeout: 90_000 })
@@ -82,7 +82,7 @@ test.describe('co-op P2P', () => {
     // Host creates a room and shows the code.
     await hostPage.goto('/')
     await expect(hostPage.locator('#menu')).toBeVisible({ timeout: 30_000 })
-    await hostPage.locator('.btn', { hasText: 'CO-OP: CREATE ROOM' }).click()
+    await hostPage.locator('.btn', { hasText: 'SQUAD: HOST ROOM' }).click()
     await expect(hostPage.locator('.room-code')).toBeVisible()
     const code = (await hostPage.locator('.room-code').textContent())?.trim() ?? ''
     expect(code).toMatch(/^[A-Z2-9]{6}$/)
@@ -95,7 +95,7 @@ test.describe('co-op P2P', () => {
     // Guest joins with the code.
     await guestPage.goto('/')
     await expect(guestPage.locator('#menu')).toBeVisible({ timeout: 30_000 })
-    await guestPage.locator('.btn', { hasText: 'CO-OP: JOIN ROOM' }).click()
+    await guestPage.locator('.btn', { hasText: 'SQUAD: JOIN ROOM' }).click()
     await guestPage.locator('.code-input').fill(code)
     await guestPage.locator('.btn', { hasText: 'CONNECT' }).click()
 
@@ -108,7 +108,7 @@ test.describe('co-op P2P', () => {
     ).toBeVisible({ timeout: 30_000 })
 
     // Launch and verify the full game loop end-to-end.
-    await hostPage.locator('.btn', { hasText: 'LAUNCH CO-OP RUN' }).click()
+    await hostPage.locator('.btn', { hasText: 'LAUNCH SQUAD RUN' }).click()
     await expect(hostPage.locator('#hud')).toBeVisible({ timeout: 30_000 })
     await expect(guestPage.locator('#hud')).toBeVisible({ timeout: 30_000 })
     await expect(guestPage.locator('#hud .hud-time')).not.toHaveText('00:00', { timeout: 90_000 })

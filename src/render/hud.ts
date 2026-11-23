@@ -48,9 +48,9 @@ export class Hud {
     this.root.id = 'hud'
     this.root.style.display = 'none'
 
-    // Top-left: shields
+    // Top-left: armor plates
     const tl = el('div', 'u p hud-tl')
-    tl.append(el('span', 'hud-label', 'SHIELDS'))
+    tl.append(el('span', 'hud-label', 'ARMOR'))
     const pips = el('div', 'pips')
     for (let i = 0; i < LIVES_MAX; i++) {
       const p = el('i')
@@ -58,9 +58,9 @@ export class Hud {
       pips.append(p)
     }
     tl.append(pips)
-    // Top-left second row: dash
+    // Top-left second row: sprint
     const dash = el('div', 'dash-row')
-    dash.append(el('span', 'hud-label', 'DASH'))
+    dash.append(el('span', 'hud-label', 'SPRINT'))
     this.dashFill = el('i')
     const dashBar = el('div', 'dash-bar')
     dashBar.append(this.dashFill)
@@ -82,15 +82,15 @@ export class Hud {
     // Boss bar (hidden until wave 3)
     this.bossBar = el('div', 'u p boss-bar')
     this.bossBar.style.display = 'none'
-    this.bossBar.append(el('span', 'boss-title', 'OVERLORD CORE'))
+    this.bossBar.append(el('span', 'boss-title', 'JUGGERNAUT'))
     const bar = el('div', 'bar')
     this.bossFill = el('i')
     bar.append(this.bossFill)
     this.bossBar.append(bar)
 
-    // Left rail: combo
+    // Left rail: streak
     this.comboWrap = el('div', 'u combo-wrap')
-    this.comboWrap.append(el('span', 'combo-label', 'COMBO'))
+    this.comboWrap.append(el('span', 'combo-label', 'STREAK'))
     this.comboEl = el('b', 'combo-val', '0x')
     this.comboWrap.append(this.comboEl)
 
@@ -103,7 +103,7 @@ export class Hud {
     tb.append(this.threatFill)
     threat.append(tb)
     const oc = el('div', 'meter')
-    oc.append(el('span', 'hud-label', 'OVERCLOCK'))
+    oc.append(el('span', 'hud-label', 'ADRENALINE'))
     this.overclockFill = el('i')
     const ob = el('div', 'meter-bar oc')
     ob.append(this.overclockFill)
@@ -130,17 +130,15 @@ export class Hud {
     this.seedEl = el('span', 'seed', '')
     modeChip.append(this.modeEl, this.seedEl)
 
-    // Target key hexagon
-    const tk = el('div', 'u tk-hex')
-    const inner = el('div')
+    // Next-key plate
+    const tk = el('div', 'u p tk-plate')
     this.targetEl = el('b', '', '-')
-    inner.append(this.targetEl, el('small', '', 'TARGET KEY'))
-    tk.append(inner)
+    tk.append(this.targetEl, el('small', '', 'NEXT KEY'))
 
     // Status line + controls hint
     const bottom = el('div', 'u hud-bottom')
-    this.statusEl = el('div', 'p status', 'CYBER ARENA ONLINE')
-    const hint = el('div', 'p hint', 'MOVE ARROWS · TYPE HOME ROW A S D F G H J K L ; \' · SPACE JUMP · SHIFT DASH · ESC PAUSE')
+    this.statusEl = el('div', 'p status', 'RANGE HOT')
+    const hint = el('div', 'p hint', 'MOVE ARROWS · TYPE HOME ROW A S D F G H J K L ; \' · SPACE JUMP · SHIFT SPRINT · ESC PAUSE')
     bottom.append(this.statusEl, hint)
 
     const pauseBtn = el('button', 'u pause-btn', 'II')
@@ -184,7 +182,7 @@ export class Hud {
       this.dashFill.style.width = `${Math.min(100, (1 - p.dashCd / 1.8) * 100)}%`
     }
     this.set(this.timeEl, 'time', formatClock(vm.time))
-    this.set(this.waveEl, 'wave', vm.wave === 3 ? 'BOSS PHASE' : `WAVE ${vm.wave}`)
+    this.set(this.waveEl, 'wave', vm.wave === 3 ? 'FINAL WAVE' : `WAVE ${vm.wave}`)
     this.set(this.killsEl, 'kills', String(vm.kills))
     this.set(this.wpmEl, 'wpm', `${wpmVal} / ${accVal}%`)
     this.threatFill.style.width = `${Math.min(100, threat * 66)}%`
@@ -200,21 +198,21 @@ export class Hud {
     this.set(this.targetEl, 'tk', ch === ' ' ? '␣' : ch)
 
     const status = vm.over === 1
-      ? 'SYSTEM SECURED'
+      ? 'RANGE CLEAR'
       : vm.over === 2
-        ? 'CRITICAL OVERLOAD'
+        ? 'OPERATOR DOWN'
         : (p?.combo ?? 0) >= 7
-          ? `SUPER OVERCLOCK ${p!.combo}x`
+          ? `ADRENALINE RUSH ${p!.combo}x`
           : vm.wave === 2
-            ? 'ELITES: 2-KEY COMBOS'
+            ? 'GUNNERS: 2-KEY SEQUENCES'
             : vm.wave === 3
-              ? 'BOSS PHASE — JUMP THE SHOCKWAVES'
-              : 'CYBER ARENA ONLINE'
+              ? 'JUGGERNAUT — JUMP THE BLAST WAVES'
+              : 'RANGE HOT'
     this.set(this.statusEl, 'status', status)
 
     if (this.partnerVisible && vm.players[1]) {
       this.set(this.partnerScore, 'pscore', formatScore(vm.players[1].score))
-      this.set(this.partnerLives, 'plives', `${vm.players[1].lives} SHIELDS`)
+      this.set(this.partnerLives, 'plives', `${vm.players[1].lives} ARMOR`)
     }
   }
 

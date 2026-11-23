@@ -67,7 +67,7 @@ export async function decodeInvite(code: string): Promise<InvitePayload> {
   } else if (clean.startsWith(`${INVITE_PREFIX_PLAIN}.`)) {
     payload = new TextDecoder().decode(fromBase64Url(clean.slice(5)))
   } else {
-    throw new Error('not a CYBER ARENA invite code')
+    throw new Error('not a RANGE HOT invite code')
   }
   const obj = JSON.parse(payload) as Partial<InvitePayload>
   if (

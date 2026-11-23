@@ -10,7 +10,7 @@ test('boots to the menu without console errors', async ({ page }) => {
   page.on('pageerror', err => errors.push(String(err)))
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#menu')).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('#menu h1')).toContainText('CYBER ARENA')
+  await expect(page.locator('#menu h1')).toContainText('RANGE')
   await page.waitForTimeout(1000)
   expect(errors).toEqual([])
 })
@@ -21,7 +21,7 @@ test('starts a solo run, spawns the HUD, and reacts to typing', async ({ page })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#menu')).toBeVisible({ timeout: 30_000 })
 
-  await page.locator('.btn', { hasText: 'SOLO RUN' }).click()
+  await page.locator('.btn', { hasText: 'SOLO DRILL' }).click()
   const hud = page.locator('#hud')
   await expect(hud).toBeVisible({ timeout: 20_000 })
   // The run clock starts ticking (any value past 00:00 — software renderers

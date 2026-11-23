@@ -6,6 +6,18 @@
  *   ?mode=daily    — daily challenge seed
  *   ?room=CODE     — pre-filled co-op join
  */
+// Self-hosted fonts (Fontsource) — no external requests on GitHub Pages.
+import '@fontsource/barlow/400.css'
+import '@fontsource/barlow/500.css'
+import '@fontsource/barlow/600.css'
+import '@fontsource/barlow-condensed/500.css'
+import '@fontsource/barlow-condensed/600.css'
+import '@fontsource/barlow-condensed/700.css'
+import '@fontsource/big-shoulders-stencil-display/400'
+import '@fontsource/big-shoulders-stencil-display/700'
+import '@fontsource/big-shoulders-stencil-display/900'
+import '@fontsource/ibm-plex-mono/400.css'
+import '@fontsource/ibm-plex-mono/600.css'
 import './ui/styles.css'
 import { randomCode, isValidCode } from './core/rng'
 import { dailySeed } from './core/stats'
@@ -66,7 +78,7 @@ class App {
 
     const app = document.getElementById('app')!
     app.append(elId('div', 'fx'))
-    document.body.append(elId('div', 'vig'), elId('div', 'sl'), elId('div', 'scanlines'))
+    document.body.append(elId('div', 'vig'), elId('div', 'sl'))
 
     this.screens = new OverlayScreens(app)
     this.menu = new Menu(app, this.menuCallbacks())
@@ -110,7 +122,7 @@ class App {
         this.hdPoll = null
         if (assets.state === 'ready') {
           this.menu.setHdStatus('HD MODELS · ONLINE', 'on')
-          this.screens.toast('HD MODELS ONLINE — FULL VISUAL LOADOUT DEPLOYED', 'ok')
+          this.screens.toast('HD MODELS ONLINE — FULL LOADOUT READY', 'ok')
         } else {
           this.menu.setHdStatus('HD MODELS · OFFLINE', 'off')
           this.screens.toast('HD MODELS UNAVAILABLE — PROCEDURAL MODE ACTIVE', 'err')
@@ -124,11 +136,11 @@ class App {
     if (this.hdGate) return
     const gate = elId('div', 'hd-gate')
     const box = el('div')
-    box.append(el('div', 'hd-title', 'DEPLOYING HD ASSETS'))
+    box.append(el('div', 'hd-title', 'LOADING EQUIPMENT'))
     const bar = elId('div', 'hd-bar')
     bar.append(el('i'))
     box.append(bar)
-    box.append(el('div', 'hd-sub', 'STREAMING MODELS · WEAPONS · SKYLINE'))
+    box.append(el('div', 'hd-sub', 'STREAMING MODELS · WEAPONS · SCENERY'))
     gate.append(box)
     document.getElementById('app')!.append(gate)
     this.hdGate = gate
@@ -441,10 +453,16 @@ class App {
   }
 }
 
-// Boot once DOM is ready.
+// Boot once DOM is ready — after the stencil/condensed faces are available,
+// so every canvas texture (target placards, containers) paints with them.
 const boot = (): void => {
-  new App()
-  document.getElementById('boot')?.remove()
+  void Promise.all([
+    document.fonts.load('700 78px "Barlow Condensed"'),
+    document.fonts.load('900 34px "Big Shoulders Stencil Display"'),
+  ]).catch(() => undefined).finally(() => {
+    new App()
+    document.getElementById('boot')?.remove()
+  })
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot)

@@ -1,6 +1,6 @@
 /** Global tuning constants. Pure data — no runtime imports. */
 
-export const VERSION = '2.0.0'
+export const VERSION = '2.1.0'
 export const GAME_ID = 'cyber-arena-3d-elite'
 
 /** Home-row combat keys (US QWERTY). */
@@ -58,11 +58,12 @@ export interface KindDef {
   boss: boolean
 }
 
+/** Kind colors: real-world paint — sand, brick, rust, signal red. */
 export const KINDS: Record<EnemyKind, KindDef> = {
-  RUNNER: { color: 0xfacc15, scale: 0.82, speed: 13, radius: 1.4, value: 80, gun: false, shoot: false, boss: false },
-  GRUNT: { color: 0xff2d4d, scale: 1.0, speed: 8.5, radius: 1.8, value: 100, gun: false, shoot: false, boss: false },
-  ELITE: { color: 0xff3df0, scale: 1.15, speed: 7, radius: 1.9, value: 200, gun: true, shoot: true, boss: false },
-  BOSS: { color: 0xff6a00, scale: 2.3, speed: 3.5, radius: 4.5, value: 2000, gun: false, shoot: false, boss: true },
+  RUNNER: { color: 0xdfa93b, scale: 0.82, speed: 13, radius: 1.4, value: 80, gun: false, shoot: false, boss: false },
+  GRUNT: { color: 0xc0452f, scale: 1.0, speed: 8.5, radius: 1.8, value: 100, gun: false, shoot: false, boss: false },
+  ELITE: { color: 0xcc5f26, scale: 1.15, speed: 7, radius: 1.9, value: 200, gun: true, shoot: true, boss: false },
+  BOSS: { color: 0xa83524, scale: 2.3, speed: 3.5, radius: 4.5, value: 2000, gun: false, shoot: false, boss: true },
 }
 
 /** Power generator obstacles: static AABBs (x, z, half-w, half-d, height). */
@@ -80,8 +81,8 @@ export const BULLET_LIFE = 4
 export const PICKUP_LIFE = 25
 
 export const KILL_MSGS: readonly string[] = [
-  'CYBER HIT', 'CORE PURGED', 'DATA CLEARED', 'OVERCLOCK',
-  'NODE SECURED', 'RAPID REACTION', 'HOSTILE DOWN', 'PRIME PROTOCOL',
+  'GOOD HIT', 'CENTER MASS', 'STEEL DOWN', 'DOUBLE TAP',
+  'HOSTILE DOWN', 'FAST HANDS', 'CLEAN KILL', 'TARGET OUT',
 ]
 
 /** Character height in world units (drives actor scaling). */
