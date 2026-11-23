@@ -1,6 +1,6 @@
 # CYBER ARENA 3D — ELITE
 
-A typing-combat arena shooter. Enemies close in — you kill them by typing the
+A typing-combat arena shooter. Enemies close in — you kill them by typing the 
 letters above their heads while running, jumping and dashing around a neon
 cyberpunk grid. Built as a fully static site: **no backend, no accounts, no
 API keys** — deployed on GitHub Pages with serverless P2P co-op.
