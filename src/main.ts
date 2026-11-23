@@ -11,13 +11,16 @@ import { randomCode, isValidCode } from './core/rng'
 import { dailySeed } from './core/stats'
 import { GameRenderer, isSoftwareRenderer } from './render/renderer'
 import { AudioEngine } from './render/audio'
-import { Menu, howToPlayContent, overlayCard, settingsContent, coopJoinCard, type MenuCallbacks, type Settings } from './ui/menu'
+import { Menu, howToPlayContent, overlayCard, settingsContent, type MenuCallbacks, type Settings } from './ui/menu'
 import { OverlayScreens } from './ui/overlay'
 import { IdleScene } from './app/menuscene'
 import { Session, type SessionMode } from './app/session'
 import { loadSettings, saveSettings } from './app/persist'
 import { assets } from './render/assets'
-import { NetRoom } from './net/room'
+import { ConnectionHub } from './net/hub'
+import { DirectRoom } from './net/direct'
+import type { Transport } from './net/transport'
+import { CoopLobby, coopJoinPrompt, directGuestWait } from './ui/lobby'
 import { NetHost } from './net/host'
 import { NetClient } from './net/client'
 
@@ -34,13 +37,6 @@ function elId(tag: string, id: string): HTMLElement {
   return e
 }
 
-function button(cls: string, text: string): HTMLButtonElement {
-  const b = document.createElement('button')
-  b.className = cls
-  b.textContent = text
-  return b
-}
-
 class App {
   private readonly renderer: GameRenderer
   private readonly audio = new AudioEngine()
@@ -49,10 +45,14 @@ class App {
   private readonly screens: OverlayScreens
   private idle: IdleScene | null = null
   private session: Session | null = null
-  private netRoom: NetRoom | null = null
+  private netTransport: Transport | null = null
+  private netHub: ConnectionHub | null = null
   private netHost: NetHost | null = null
   private netClient: NetClient | null = null
-  private lobbyDismiss: (() => void) | null = null
+  private lobby: CoopLobby | null = null
+  private lobbyCode: string | null = null
+  private lobbyDirect: DirectRoom | null = null
+  private guestWait: { setStatus: (text: string, cls?: '' | 'ok' | 'err') => void; dismiss: () => void } | null = null
   private raf = 0
   private lastIdle = 0
   private hdGate: HTMLElement | null = null
@@ -220,8 +220,8 @@ class App {
       speedlinesEl: document.getElementById('sl')!,
       settings: this.settings,
       audio: this.audio,
-      net: isCoop && this.netRoom
-        ? { room: this.netRoom, host: this.netHost ?? undefined, client: this.netClient ?? undefined }
+      net: isCoop && this.netTransport
+        ? { room: this.netTransport, host: this.netHost ?? undefined, client: this.netClient ?? undefined }
         : undefined,
       onExitToMenu: () => {
         this.teardownNet()
@@ -233,34 +233,58 @@ class App {
   }
 
   private teardownNet(): void {
-    this.netRoom?.leave()
-    this.netRoom = null
+    this.netTransport?.leave()
+    this.netTransport = null
+    this.netHub = null
     this.netHost = null
     this.netClient = null
-    this.lobbyDismiss?.()
-    this.lobbyDismiss = null
+    this.lobbyDirect = null
+    this.guestWait?.dismiss()
+    this.guestWait = null
+    this.lobby?.destroy()
+    this.lobby = null
+    this.lobbyCode = null
   }
 
   /* ---------------- co-op flow ---------------- */
 
-  private coopCreate(): void {
+  /** Host: create a room (relays + trackers + brokers raced in parallel). */
+  private coopCreate(code = randomCode()): void {
     this.audio.unlock()
     this.audio.sfx('ui')
     this.teardownNet()
-    const code = randomCode()
-    this.netRoom = new NetRoom(code, 'host')
-    this.netHost = new NetHost(this.netRoom, code, this.settings.name || 'HOST')
-    this.showLobby(code, true)
+    this.lobbyCode = code
+    const hub = new ConnectionHub(code, 'host')
+    this.netTransport = hub
+    this.netHub = hub
+    this.netHost = new NetHost(hub, code, this.settings.name || 'HOST')
+    hub.onPeerJoin(() => this.lobby?.partnerJoined())
+    hub.onPeerLeave(() => this.lobby?.partnerLeft())
+    this.openLobby(code, true)
+    void hub.start()
   }
 
+  /** Guest: join prompt with room-code and direct-invite modes. */
   private coopJoinPrompt(): void {
-    const app = document.getElementById('app')!
-    const prompt = coopJoinCard(app, code => {
-      prompt.dismiss()
-      this.coopJoin(code)
-    }, () => undefined)
+    this.audio.unlock()
+    this.audio.sfx('ui')
+    const prompt = coopJoinPrompt(
+      document.getElementById('app')!,
+      {
+        onCode: code => {
+          prompt.dismiss()
+          this.coopJoin(code)
+        },
+        onDirectInvite: invite => {
+          prompt.dismiss()
+          void this.coopJoinDirect(invite)
+        },
+      },
+      () => undefined,
+    )
   }
 
+  /** Guest: join a room code through the signaling networks. */
   private coopJoin(code: string): void {
     if (!isValidCode(code)) {
       this.screens.toast('INVALID CODE — 6 CHARACTERS (NO O/I/L/0/1)', 'err')
@@ -268,70 +292,127 @@ class App {
       return
     }
     this.teardownNet()
-    this.netRoom = new NetRoom(code, 'guest')
-    this.netClient = new NetClient(this.netRoom, this.settings.name || 'GUEST')
-    this.showLobby(code, false)
+    this.lobbyCode = code
+    const hub = new ConnectionHub(code, 'guest')
+    this.netTransport = hub
+    this.netHub = hub
+    this.netClient = new NetClient(hub, this.settings.name || 'GUEST')
+    this.openLobby(code, false)
+    void hub.start()
   }
 
-  private showLobby(code: string, isHost: boolean): void {
+  /** Guest: direct-invite path — no relays at all. */
+  private async coopJoinDirect(invite: string): Promise<void> {
+    this.teardownNet()
+    let room: DirectRoom
+    let reply: string
+    try {
+      ;({ room, reply } = await DirectRoom.joinFromInvite(invite))
+    } catch (err) {
+      this.screens.toast(`INVALID INVITE — ${err instanceof Error ? err.message.toUpperCase() : 'DECODE FAILED'}`, 'err')
+      this.bootIdle()
+      return
+    }
+    this.netTransport = room
+    this.lobbyDirect = room
+    this.netClient = new NetClient(room, this.settings.name || 'GUEST')
     this.menu.show(false)
     this.stopIdle()
-    const app = document.getElementById('app')!
-    const { card, close, dismiss } = overlayCard(app, isHost ? 'CO-OP ROOM CREATED' : 'JOINING CO-OP ROOM', () => this.exitLobby())
-    this.lobbyDismiss = dismiss
-    const wrap = el('div')
-    wrap.append(el('p', '', isHost
-      ? 'Send this code to your friend. The run launches once they connect.'
-      : 'Waiting for the host to launch the run...'))
-    wrap.append(el('div', 'room-code', code))
-    const status = el('p', 'lobby-status', isHost ? 'WAITING FOR PARTNER' : 'CONNECTING...')
-    wrap.append(status)
+    const wait = directGuestWait(document.getElementById('app')!, reply, () => this.exitLobby())
+    this.guestWait = wait
+    room.onPeerJoin(() => wait.setStatus('CONNECTED — WAITING FOR HOST TO LAUNCH', 'ok'))
+    room.onPeerLeave(() => wait.setStatus('CONNECTION LOST', 'err'))
+    this.netClient.onStart = () => {
+      wait.dismiss()
+      this.guestWait = null
+      this.startSession('coop-guest', this.lobbyCode ?? '')
+    }
+    this.netClient.onKick = reason => {
+      wait.dismiss()
+      this.guestWait = null
+      this.screens.toast(reason, 'err')
+      this.exitLobby()
+    }
+  }
 
-    if (isHost) {
-      const launch = button('btn magenta', 'LAUNCH CO-OP RUN')
-      launch.disabled = true
-      launch.addEventListener('click', () => {
+  /** Shared lobby wiring for the relay path. */
+  private openLobby(code: string, isHost: boolean): void {
+    this.menu.show(false)
+    this.stopIdle()
+    const lobby = new CoopLobby(
+      document.getElementById('app')!,
+      code,
+      isHost,
+      () => this.exitLobby(),
+    )
+    this.lobby = lobby
+    this.netHub?.onStatus(s => lobby.setNetStatus(s))
+
+    if (isHost && this.netHost) {
+      lobby.onLaunch = () => {
         this.netHost?.start()
-        dismiss()
+        lobby.destroy()
+        this.lobby = null
         this.startSession('coop-host', code)
-      })
-      wrap.append(launch)
-      this.netRoom!.onPeerJoin(() => {
-        if (this.netHost?.started) return
-        status.textContent = 'PARTNER CONNECTED — READY'
-        launch.disabled = false
-        launch.focus()
-        this.audio.sfx('pickup')
-      })
-      this.netRoom!.onPeerLeave(() => {
-        if (this.netHost?.started) return
-        status.textContent = 'PARTNER LEFT — WAITING...'
-        launch.disabled = true
-      })
-    } else {
-      this.netClient!.onStart = () => {
-        dismiss()
+      }
+      lobby.onDirectInvite = () => this.hostDirectInvite()
+      lobby.onAcceptReply = reply => void this.hostAcceptReply(reply)
+      lobby.onBackToCode = () => this.coopCreate(code)
+    } else if (this.netClient) {
+      this.netClient.onStart = () => {
+        lobby.destroy()
+        this.lobby = null
         this.startSession('coop-guest', code)
       }
-      this.netClient!.onKick = reason => {
-        dismiss()
+      this.netClient.onKick = reason => {
+        lobby.destroy()
+        this.lobby = null
         this.screens.toast(reason, 'err')
         this.exitLobby()
       }
-      window.setTimeout(() => {
-        if (this.netClient && !this.netClient.started && !this.netClient.hasSnapshots && this.lobbyDismiss) {
-          status.textContent = 'STILL CONNECTING — CHECK THE CODE AND BOTH NETWORKS'
-        }
-      }, 12000)
     }
+  }
 
-    const copy = button('btn', 'COPY CODE')
-    copy.addEventListener('click', () => {
-      void navigator.clipboard?.writeText(code).then(() => this.screens.toast('CODE COPIED', 'ok'))
-    })
-    wrap.append(copy)
-    card.append(wrap)
-    close()
+  /** Host: switch the lobby to the direct-invite flow. */
+  private async hostDirectInvite(): Promise<void> {
+    const lobby = this.lobby
+    if (!lobby || !this.lobbyCode) return
+    if (this.netHost?.guestReady) {
+      lobby.directError('PARTNER ALREADY CONNECTED VIA RELAYS — LAUNCH!')
+      return
+    }
+    let room: DirectRoom
+    let invite: string
+    try {
+      ;({ room, code: invite } = await DirectRoom.createInvite())
+    } catch (err) {
+      console.warn('direct: invite failed', err)
+      lobby.directError('COULD NOT BUILD INVITE — BROWSER BLOCKED WEBRTC')
+      return
+    }
+    // The hub's job is done: swap the transport under the host.
+    this.netHub?.leave()
+    this.netHub = null
+    this.netTransport = room
+    this.lobbyDirect = room
+    const code = this.lobbyCode
+    this.netHost = new NetHost(room, code, this.settings.name || 'HOST')
+    room.onPeerJoin(() => lobby.directConnected())
+    room.onPeerLeave(() => lobby.directError('FRIEND DISCONNECTED — GENERATE A NEW INVITE'))
+    lobby.showHostDirect(invite)
+  }
+
+  /** Host: accept the friend's direct reply code. */
+  private async hostAcceptReply(reply: string): Promise<void> {
+    const lobby = this.lobby
+    const room = this.lobbyDirect
+    if (!lobby || !room) return
+    try {
+      await room.acceptReply(reply)
+      lobby.setStatus('ACCEPTED — OPENING LINK…')
+    } catch (err) {
+      lobby.directError(`INVALID REPLY — ${err instanceof Error ? err.message.toUpperCase() : 'DECODE FAILED'}`)
+    }
   }
 
   private exitLobby(): void {

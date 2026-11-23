@@ -261,3 +261,41 @@ html, body {
 #hd-gate .hd-bar { margin: 18px auto 0; width: 260px; height: 10px; background: #0f1c33; border: 1px solid rgba(56,189,248,.35); overflow: hidden; transform: skewX(-20deg) }
 #hd-gate .hd-bar i { display: block; height: 100%; width: 0%; background: #22d3ee; box-shadow: 0 0 14px #22d3ee; transition: width .12s linear }
 #hd-gate .hd-sub { margin-top: 14px; font-size: 10px; letter-spacing: 4px; color: #94a3b8; text-align: center }
+
+/* ---------- co-op lobby: live signal diagnostics ---------- */
+.lobby-body { max-width: 420px }
+.lobby-status.ok { color: #4ade80 }
+.lobby-status.err { color: #f87171 }
+.lobby-note {
+  color: #fbbf24; font-size: 11px; text-align: center; margin: 4px 0 8px;
+  letter-spacing: 1px; line-height: 1.6;
+}
+.sig-matrix {
+  display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+  margin: 10px 0 2px;
+}
+.sig-chip {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px;
+  padding: 4px 9px; border: 1px solid rgba(56,189,248,.35);
+  background: rgba(6,13,29,.85); color: #94a3b8; white-space: nowrap;
+}
+.sig-chip.ready { color: #4ade80; border-color: rgba(74,222,128,.5); text-shadow: 0 0 8px rgba(74,222,128,.4) }
+.sig-chip.connecting { color: #fbbf24; border-color: rgba(251,191,36,.5); animation: dotpulse 1.2s infinite }
+.sig-chip.off { color: #475569; border-color: rgba(71,85,105,.4) }
+
+/* join prompt tabs + direct invite boxes */
+.join-tabs { display: flex; gap: 8px; margin-bottom: 14px }
+.join-tab {
+  flex: 1; padding: 9px 0; font: 700 11px 'Courier New', monospace; letter-spacing: 3px;
+  color: #94a3b8; background: rgba(6,13,29,.7); border: 1px solid rgba(56,189,248,.3);
+  cursor: pointer;
+}
+.join-tab.on { color: #22d3ee; border-color: rgba(34,211,238,.8); box-shadow: 0 0 14px rgba(34,211,238,.25) }
+.direct-out, .direct-in {
+  width: 100%; box-sizing: border-box; min-height: 74px; max-height: 160px;
+  padding: 9px; font: 400 10px/1.5 ui-monospace, 'Courier New', monospace;
+  color: #7dd3fc; background: #060d1d; border: 1px solid rgba(56,189,248,.45);
+  outline: none; resize: vertical; word-break: break-all;
+}
+.direct-out:focus, .direct-in:focus { box-shadow: 0 0 16px rgba(56,189,248,.3) }
+.card h3 { margin-top: 16px }

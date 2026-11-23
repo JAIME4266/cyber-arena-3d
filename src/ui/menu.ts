@@ -158,6 +158,7 @@ export function howToPlayContent(card: HTMLElement): void {
   card.append(ul)
   card.append(el('h3', '', 'CO-OP'))
   card.append(el('p', '', 'Create a room, send the 6-char code to a friend, and fight the same arena together over a direct browser-to-browser connection. No server, no account.'))
+  card.append(el('p', '', 'If the code ever fails to connect, switch to DIRECT LINK: send the invite code over any messenger and paste the reply back — it works with zero relays.'))
 }
 
 export function settingsContent(card: HTMLElement, s: Settings, onChange: (s: Settings) => void): void {
@@ -215,28 +216,4 @@ export function settingsContent(card: HTMLElement, s: Settings, onChange: (s: Se
   nameInput.addEventListener('input', () => onChange({ ...s, name: nameInput.value.toUpperCase() }))
   nameRow.append(nameInput)
   card.append(nameRow)
-}
-
-/** Co-op join prompt. Returns dismiss so callers can remove it programmatically. */
-export function coopJoinCard(parent: HTMLElement, onJoin: (code: string) => void, onClose: () => void): { dismiss: () => void } {
-  const { card, close, dismiss } = overlayCard(parent, 'JOIN CO-OP ROOM', onClose)
-  card.append(el('p', '', 'Ask your friend for their 6-character room code.'))
-  const input = document.createElement('input')
-  input.className = 'code-input'
-  input.maxLength = 6
-  input.placeholder = 'XXXXXX'
-  input.setAttribute('aria-label', 'Room code')
-  input.autocomplete = 'off'
-  card.append(input)
-  const actions = el('div', 'row-actions')
-  const go = el('button', 'btn magenta', 'CONNECT')
-  go.addEventListener('click', () => onJoin(input.value.trim().toUpperCase()))
-  actions.append(go)
-  card.append(actions)
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') go.click()
-    if (e.key === 'Escape') close()
-  })
-  window.setTimeout(() => input.focus(), 50)
-  return { dismiss }
 }

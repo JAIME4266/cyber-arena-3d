@@ -24,7 +24,7 @@ import { OverlayScreens } from '../ui/overlay'
 import type { Settings } from '../ui/menu'
 import type { NetHost } from '../net/host'
 import type { NetClient } from '../net/client'
-import type { NetRoom } from '../net/room'
+import type { Transport } from '../net/transport'
 
 export type SessionMode = 'solo' | 'daily' | 'coop-host' | 'coop-guest'
 
@@ -36,7 +36,7 @@ export interface SessionConfig {
   speedlinesEl: HTMLElement
   settings: Settings
   audio: AudioEngine
-  net?: { room: NetRoom; host?: NetHost; client?: NetClient }
+  net?: { room: Transport; host?: NetHost; client?: NetClient }
   onExitToMenu: () => void
 }
 

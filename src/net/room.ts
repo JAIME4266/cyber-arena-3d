@@ -1,85 +1,115 @@
 /**
- * Net room: a thin typed wrapper around Trystero (WebRTC data channels with
- * serverless signaling over public Nostr relays — no backend, no keys).
- *
- * Roles: the player who clicks "Create Room" generates the code and becomes
- * HOST (runs the authoritative sim). The joiner is the GUEST.
+ * StrategyRoom: one trystero signaling strategy (nostr / torrent / mqtt)
+ * wrapped as a routed room. Peer ids are namespaced (`nostr:abcd…`) so the
+ * hub can route traffic to the exact strategy that owns a peer — each
+ * strategy assigns the same human a *different* wire id.
  */
-import { joinRoom } from 'trystero'
-import type { MessageAction, Room } from 'trystero'
+import type { MessageAction, Room } from '@trystero-p2p/nostr'
 import { GAME_ID } from '../core/constants'
 import { decode, encode, type NetMsg } from '../core/protocol'
+import type { MessageHandler, PeerHandler, StrategyName } from './transport'
+import { RTC_CONFIG } from './ice'
+import { relayUrls, type StrategyModule } from './strategies'
 
-export type PeerHandler = (peerId: string) => void
+/** Room id namespace. Wire-compatible with the previous build. */
+export function roomTopic(code: string): string {
+  return `v1-${code.toUpperCase()}`
+}
 
-export class NetRoom {
-  readonly code: string
-  readonly role: 'host' | 'guest'
+export class StrategyRoom {
+  readonly name: StrategyName
   private readonly room: Room
   private readonly action: MessageAction<string>
-  private readonly peerJoinHandlers = new Set<PeerHandler>()
-  private readonly peerLeaveHandlers = new Set<PeerHandler>()
-  private readonly msgHandlers = new Set<(msg: NetMsg, peerId: string) => void>()
   private readonly peerIds = new Set<string>()
-  private readonly unsubscribes: Array<() => void> = []
+  private readonly unsubs: Array<() => void> = []
+  private closed = false
 
-  constructor(code: string, role: 'host' | 'guest') {
-    this.code = code
-    this.role = role
-    this.room = joinRoom({ appId: GAME_ID }, `v1-${code}`)
+  /* Routing targets, wired by the hub. */
+  onMessage: MessageHandler = () => {}
+  onJoin: PeerHandler = () => {}
+  onLeave: PeerHandler = () => {}
+
+  constructor(
+    mod: StrategyModule,
+    code: string,
+    private readonly role: 'host' | 'guest',
+  ) {
+    this.name = mod.name
+    this.room = mod.joinRoom(
+      {
+        appId: GAME_ID,
+        relayConfig: { urls: relayUrls(mod.name) },
+        rtcConfig: RTC_CONFIG,
+      },
+      roomTopic(code),
+    )
     this.action = this.room.makeAction<string>('m')
-
-    this.unsubscribes.push(
+    this.unsubs.push(
       this.action.onMessage((data, ctx) => {
         try {
           const msg = decode(data)
-          for (const h of this.msgHandlers) h(msg, ctx.peerId)
+          this.onMessage(msg, this.scope(ctx.peerId))
         } catch (err) {
-          console.warn('net: dropped malformed message', err)
+          console.warn(`net[${this.name}]: dropped malformed message`, err)
         }
       }),
       this.room.onPeerJoin(ctx => {
         this.peerIds.add(ctx.peerId)
-        for (const h of this.peerJoinHandlers) h(ctx.peerId)
+        this.onJoin(this.scope(ctx.peerId))
       }),
       this.room.onPeerLeave(ctx => {
         this.peerIds.delete(ctx.peerId)
-        for (const h of this.peerLeaveHandlers) h(ctx.peerId)
+        this.onLeave(this.scope(ctx.peerId))
       }),
       this.room.onError(err => {
-        console.warn('net: room error', err)
+        console.warn(`net[${this.name}]: room error`, err)
       }),
     )
   }
 
+  get transportRole(): 'host' | 'guest' {
+    return this.role
+  }
+
+  private scope(peerId: string): string {
+    return `${this.name}:${peerId}`
+  }
+
+  private unscope(scopedId: string): string | null {
+    return scopedId.startsWith(`${this.name}:`) ? scopedId.slice(this.name.length + 1) : null
+  }
+
   get peers(): string[] {
-    return [...this.peerIds]
+    return [...this.peerIds].map(p => this.scope(p))
   }
 
-  /** Broadcast to everyone, or target a single peer. */
-  sendMsg(msg: NetMsg, peerId?: string): void {
-    void this.action.send(encode(msg), peerId ? { target: peerId } : undefined)
+  hasPeer(scopedId: string): boolean {
+    const raw = this.unscope(scopedId)
+    return raw !== null && this.peerIds.has(raw)
   }
 
-  onMessage(h: (msg: NetMsg, peerId: string) => void): void {
-    this.msgHandlers.add(h)
-  }
-
-  onPeerJoin(h: PeerHandler): void {
-    this.peerJoinHandlers.add(h)
-  }
-
-  onPeerLeave(h: PeerHandler): void {
-    this.peerLeaveHandlers.add(h)
+  /** Send to one scoped peer (must belong to this strategy) or broadcast. */
+  sendMsg(msg: NetMsg, scopedId?: string): void {
+    if (this.closed) return
+    const raw = scopedId === undefined ? undefined : this.unscope(scopedId)
+    if (scopedId !== undefined && raw === null) return
+    // 0.27 action.send returns a promise; swallow rejections (peer flaps are
+    // routine mid-handshake and must never surface as unhandled rejections).
+    this.action.send(encode(msg), raw === undefined ? undefined : { target: raw }).catch(err => {
+      console.warn(`net[${this.name}]: send failed`, err)
+    })
   }
 
   leave(): void {
-    try {
-      this.sendMsg({ v: 1, t: 'bye' })
-    } catch {
-      /* best effort */
+    if (this.closed) return
+    this.closed = true
+    for (const u of this.unsubs) {
+      try {
+        u()
+      } catch {
+        /* ignore */
+      }
     }
-    for (const u of this.unsubscribes) u()
-    void this.room.leave()
+    void this.room.leave().catch(() => {})
   }
 }

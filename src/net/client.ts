@@ -8,10 +8,10 @@ import { movePlayerBody } from '../core/sim'
 import { INTERP_DELAY, OBSTACLES } from '../core/constants'
 import type { Bubble, EnemyKind, InputState, SimEvent, Snapshot, ViewModel } from '../core/types'
 import { ENEMY_KIND_ORDER, emptyInput } from '../core/types'
-import type { NetRoom } from './room'
+import type { Transport } from './transport'
 
 export class NetClient {
-  private readonly room: NetRoom
+  private readonly room: Transport
   private snaps: Snapshot[] = []
   private readonly seqs = new Map<number, { seq: string; kind: EnemyKind }>()
   private readonly self = {
@@ -29,7 +29,7 @@ export class NetClient {
   onStart: () => void = () => {}
   onKick: (reason: string) => void = () => {}
 
-  constructor(room: NetRoom, private readonly selfName: string) {
+  constructor(room: Transport, private readonly selfName: string) {
     this.room = room
     room.onPeerJoin(peerId => room.sendMsg({ v: 1, t: 'hello', name: this.selfName }, peerId))
     room.onPeerLeave(() => this.onKick('HOST DISCONNECTED'))

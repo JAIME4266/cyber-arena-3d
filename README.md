@@ -63,7 +63,12 @@ src/
                   scales with combo — no audio files, ever)
     hud.ts        Dirty-checked DOM HUD
   ui/       Menu, overlays, settings (plain DOM, keyboard accessible)
-  net/      Serverless co-op (Trystero over public Nostr relays)
+  net/      Serverless co-op — connection hub with racing transports
+    hub.ts        Races 3 signaling networks, deterministic pinning, failover
+    strategies.ts Nostr relays + WebTorrent trackers + MQTT brokers (curated)
+    room.ts       One Trystero strategy wrapped as a routed transport
+    direct.ts     DIRECT LINK fallback: paste-code invite, zero infrastructure
+    ice.ts        STUN + free TURN (UDP/TCP) — survives symmetric NAT/CGNAT
     host.ts       Host-authoritative: applies inputs, 10 Hz snapshots
     client.ts     Guest: input sender + local prediction + interpolation
   app/      Session orchestration, idle menu scene, persistence
@@ -76,9 +81,23 @@ The guest sends inputs (typed keys immediately, movement at 10 Hz) and renders
 interpolated snapshots ~120 ms behind live, predicting their own movement
 locally with the same physics and blending toward authoritative positions.
 Sim events (kills, waves, boss phases) are broadcast immediately for VFX and
-audio. If both peers sit behind stubborn NATs, WebRTC may fail to connect —
-that's the tradeoff of zero-infrastructure co-op; trying a different network
-(hotspot) resolves it.
+audio.
+
+**How two players actually find each other (no server, ever):** the connection
+hub joins the same room code on *three independent public networks at once* —
+Nostr relays, WebTorrent trackers and MQTT brokers. Whichever network both
+players can reach wins; the others stay connected as hot spares. ICE runs
+multiple STUN servers plus a free TURN relay over UDP *and* TCP, so peers
+behind symmetric NAT / CGNAT (mobile data, strict routers) still connect. If
+no partner appears, the hub re-announces on fresh connections every ~14 s —
+no infinite "connecting…" limbo — and the lobby shows a live signal matrix
+(`NOSTR 4/5 · TORRENT 1/1 · MQTT 1/1`) instead of a spinner.
+
+If every network is blocked (school/office firewalls), the lobby's **DIRECT
+LINK** removes the middleman entirely: the host generates a ~1 KB invite code
+to send over any messenger; the friend pastes it, sends back a reply code,
+and the two browsers connect WebRTC directly. Zero relays, zero accounts,
+works anywhere two people can exchange text.
 
 ### HD models: the artist assets, alive
 
