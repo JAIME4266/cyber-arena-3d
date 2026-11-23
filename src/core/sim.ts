@@ -1,0 +1,692 @@
+/**
+ * The authoritative, deterministic game simulation.
+ *
+ * Rules of the house:
+ *  - NO Math.random anywhere. All randomness flows from the seeded RNG.
+ *  - NO DOM / three.js / network imports. Pure logic + data.
+ *  - Fixed timestep (1/60). The host (or solo player) steps it; the renderer
+ *    and the network layer only read from it.
+ *
+ * This determinism is what makes the daily challenge fair, the unit tests
+ * golden, and the co-op host authoritative without drift.
+ */
+import { RNG } from './rng'
+import {
+  ARENA, BULLET_LIFE, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
+  COMBO_WINDOW, DASH_CD, DASH_INV, DASH_MULT, DASH_TIME, GRAVITY, INV_TIME, JUMP_VY,
+  KEYS, KINDS, LIVES_MAX, OBSTACLES, PICKUP_LIFE, PLAYER_RADIUS, PLAYER_SPEED,
+  THREAT_BASE, THREAT_GAIN, THREAT_KILLS, THREAT_MAX, WAVE2_KILLS, WAVE3_KILLS,
+  type EnemyKind, type Obstacle,
+} from './constants'
+import type {
+  Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, Shock, SimEvent, Snapshot,
+} from './types'
+import { emptyInput } from './types'
+
+export interface MoveCtx {
+  obstacles: readonly Obstacle[]
+  bubbles: readonly Bubble[]
+  /** Arena half-size. */
+  arena: number
+}
+
+const MOVE_CTX: MoveCtx = { obstacles: OBSTACLES, bubbles: [], arena: ARENA }
+
+function circleHitsObstacle(x: number, z: number, r: number, obs: readonly Obstacle[]): boolean {
+  for (const o of obs) {
+    if (x > o.x - o.hw - r && x < o.x + o.hw + r && z > o.z - o.hd - r && z < o.z + o.hd + r) return true
+  }
+  return false
+}
+
+function pushOutOfObstacles(p: { x: number; z: number }, r: number, obs: readonly Obstacle[]): void {
+  for (const o of obs) {
+    const hx = o.hw + r
+    const hz = o.hd + r
+    const dx = p.x - o.x
+    const dz = p.z - o.z
+    if (Math.abs(dx) < hx && Math.abs(dz) < hz) {
+      if (hx - Math.abs(dx) < hz - Math.abs(dz)) p.x = o.x + Math.sign(dx || 1) * hx
+      else p.z = o.z + Math.sign(dz || 1) * hz
+    }
+  }
+}
+
+function inSlowBubble(x: number, z: number, y: number, bubbles: readonly Bubble[]): boolean {
+  for (const b of bubbles) {
+    if (Math.hypot(x - b.x, z - b.z) < b.r * 0.92 && y < b.r * 0.8) return true
+  }
+  return false
+}
+
+const lerpAngle = (a: number, b: number, t: number): number =>
+  a + (((((b - a + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) - Math.PI)) * t
+
+/**
+ * Shared movement body — used by the authoritative sim AND by the co-op
+ * guest's local prediction, so both sides move with identical physics.
+ */
+export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx: MoveCtx, comboSpeed: number): void {
+  // Jump
+  if (inp.jump && p.y <= 0.01) p.vy = JUMP_VY
+  p.vy -= GRAVITY * dt
+  p.y = Math.max(0, p.y + p.vy * dt)
+  if (p.y === 0) p.vy = 0
+
+  // Dash
+  p.dashCd = Math.max(0, p.dashCd - dt)
+  if (inp.dash && p.dashCd <= 0 && p.dashT <= 0) {
+    const len = Math.hypot(inp.mx, inp.mz)
+    if (len > 0) {
+      p.dashDirX = inp.mx / len
+      p.dashDirZ = inp.mz / len
+    } else {
+      p.dashDirX = Math.sin(p.ang)
+      p.dashDirZ = Math.cos(p.ang)
+    }
+    p.dashT = DASH_TIME
+    p.dashCd = DASH_CD
+    p.inv = Math.max(p.inv, DASH_INV)
+  }
+  p.dashT = Math.max(0, p.dashT - dt)
+
+  const slowed = inSlowBubble(p.x, p.z, p.y, ctx.bubbles)
+  p.slowed = slowed
+
+  const want = Math.hypot(inp.mx, inp.mz) > 0
+  p.moving = want
+
+  let vx = 0
+  let vz = 0
+  if (p.dashT > 0) {
+    vx = p.dashDirX * PLAYER_SPEED * DASH_MULT
+    vz = p.dashDirZ * PLAYER_SPEED * DASH_MULT
+  } else if (want) {
+    const l = Math.hypot(inp.mx, inp.mz)
+    const sp = PLAYER_SPEED * (1 + comboSpeed) * (slowed ? 0.5 : 1)
+    vx = (inp.mx / l) * sp
+    vz = (inp.mz / l) * sp
+  }
+
+  const nx = p.x + vx * dt
+  const nz = p.z + vz * dt
+  const lim = ctx.arena - 3
+  if (!circleHitsObstacle(nx, p.z, PLAYER_RADIUS, ctx.obstacles)) p.x = Math.max(-lim, Math.min(lim, nx))
+  if (!circleHitsObstacle(p.x, nz, PLAYER_RADIUS, ctx.obstacles)) p.z = Math.max(-lim, Math.min(lim, nz))
+
+  // Facing
+  let wantAng: number | null = null
+  if (want) wantAng = Math.atan2(inp.mx, inp.mz)
+  if (wantAng !== null) p.ang = lerpAngle(p.ang, wantAng, Math.min(1, dt * 12))
+}
+
+function makePlayer(id: number, name: string): PlayerState {
+  return {
+    id, name, alive: true,
+    x: id === 0 ? -4 : 4, z: 0, y: 0, vy: 0,
+    ang: id === 0 ? Math.PI / 2 : -Math.PI / 2, facing: 0,
+    lives: LIVES_MAX, inv: 0, score: 0, kills: 0,
+    combo: 0, comboT: 0, bestCombo: 0, correct: 0, wrong: 0,
+    dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: 1, moving: false,
+    lockId: -1, slowed: false,
+  }
+}
+
+export interface SimOptions {
+  seed: string
+  playerCount: 1 | 2
+  names?: [string, string]
+}
+
+/** Picks the enemy mix for a wave. Exported pure for unit testing. */
+export function pickKind(wave: number, rng: RNG): EnemyKind {
+  if (wave === 1) return rng.chance(0.35) ? 'RUNNER' : 'GRUNT'
+  if (wave === 2) return rng.chance(0.65) ? 'ELITE' : 'RUNNER'
+  return rng.chance(0.5) ? 'GRUNT' : 'RUNNER'
+}
+
+/** Live enemy cap per wave — ramps with kills like the original game. */
+export function enemyCap(wave: number, kills: number): number {
+  if (wave === 1) return Math.min(14, 6 + Math.floor(kills / 4))
+  if (wave === 2) return Math.min(9, 5 + Math.floor(Math.max(0, kills - 50) / 8))
+  return 4
+}
+
+export class Sim {
+  readonly rng: RNG
+  readonly seed: string
+  players: PlayerState[]
+  enemies: Enemy[] = []
+  bullets: Bullet[] = []
+  shocks: Shock[] = []
+  pickups: Pickup[] = []
+  bubbles: Bubble[] = []
+  events: SimEvent[] = []
+
+  time = 0
+  runClock = 0
+  wave = 1
+  kills = 0
+  over: 0 | 1 | 2 = 0
+  boss: Enemy | null = null
+  bossPhase = 0
+  private nextEnemyId = 1
+  private nextBulletId = 0
+  readonly bulletIds: number[] = []
+  readonly spawnedIds: number[] = []
+
+  constructor(opts: SimOptions) {
+    this.seed = opts.seed
+    this.rng = new RNG(opts.seed)
+    const names = opts.names ?? ['PLAYER 1', 'PLAYER 2']
+    this.players = [makePlayer(0, opts.playerCount > 1 ? names[0] : names[0])]
+    if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1]))
+    this.rollBubbles()
+    // Initial spawn wave happens on first step.
+  }
+
+  private rollBubbles(): void {
+    this.bubbles = []
+    const n = 2 + this.rng.int(2)
+    for (let i = 0; i < n; i++) {
+      let x: number
+      let z: number
+      let tries = 0
+      const r = this.rng.range(9, 13)
+      do {
+        x = this.rng.range(-1, 1) * (ARENA - 18)
+        z = this.rng.range(-1, 1) * (ARENA - 18)
+        tries++
+      } while ((Math.hypot(x, z) < 24 || circleHitsObstacle(x, z, r, OBSTACLES)) && tries < 30)
+      this.bubbles.push({ x, z, r })
+    }
+  }
+
+  /** Threat multiplier — enemies get faster as total kills climb. */
+  threat(): number {
+    return Math.min(THREAT_MAX, THREAT_BASE + Math.min(1, this.kills / THREAT_KILLS) * THREAT_GAIN)
+  }
+
+  comboSpeed(p: PlayerState): number {
+    return Math.min(COMBO_SPEED_MAX, p.combo * COMBO_SPEED_PER)
+  }
+
+  /* ------------------------------------------------ typing (combat) ------------------------------------------------ */
+
+  typeKey(pid: number, ch: string): KeyResult {
+    const p = this.players[pid]
+    if (!p || !p.alive || this.over !== 0) return 'none'
+    if (!KEYS.includes(ch)) return 'none'
+
+    let target: Enemy | null
+    const locked = p.lockId >= 0 ? this.enemies.find(e => e.id === p.lockId) : undefined
+    if (locked) {
+      target = locked.seq[locked.ti] === ch ? locked : null
+      if (!target) {
+        // Miss on a locked target: reset its sequence, break combo.
+        locked.ti = 0
+        p.lockId = -1
+        this.miss(p)
+        return 'miss'
+      }
+    } else {
+      // No lock: pick the NEAREST enemy whose next letter matches.
+      let best: Enemy | null = null
+      let bestD = Infinity
+      for (const e of this.enemies) {
+        if (e.seq[e.ti] === ch) {
+          const d = Math.hypot(e.x - p.x, e.z - p.z)
+          if (d < bestD) { bestD = d; best = e }
+        }
+      }
+      target = best
+      if (!target) { this.miss(p); return 'miss' }
+    }
+
+    p.lockId = target.id
+    p.correct++
+    p.combo++
+    p.comboT = COMBO_WINDOW
+    p.bestCombo = Math.max(p.bestCombo, p.combo)
+    target.ti++
+    if (target.ti >= target.seq.length) {
+      p.lockId = -1
+      this.completeSequence(p, target)
+      return 'complete'
+    }
+    return 'advance'
+  }
+
+  private miss(p: PlayerState): void {
+    p.wrong++
+    p.combo = 0
+    p.comboT = 0
+  }
+
+  private completeSequence(p: PlayerState, e: Enemy): void {
+    if (e.kind === 'BOSS' && --e.hp > 0) {
+      // Boss survives: new sequence, maybe a phase change.
+      const oldPhase = this.bossPhase
+      this.bossPhase = e.hp >= 7 ? 1 : e.hp >= 4 ? 2 : 3
+      e.seq = this.mkSeq(e.hp >= 7 ? 2 : e.hp >= 4 ? 3 : 4)
+      e.ti = 0
+      this.events.push({ t: 'boss', hp: e.hp, max: e.maxhp })
+      this.events.push({ t: 'seq', id: e.id, seq: e.seq, kind: e.kind })
+      if (this.bossPhase !== oldPhase) this.events.push({ t: 'bossphase', phase: this.bossPhase })
+      return
+    }
+    this.killEnemy(e, p)
+  }
+
+  private killEnemy(e: Enemy, by: PlayerState): void {
+    const i = this.enemies.indexOf(e)
+    if (i < 0) return
+    this.enemies.splice(i, 1)
+    for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
+    this.kills++
+    by.kills++
+    by.score += Math.round(KINDS[e.kind].value * (1 + Math.min(by.combo, COMBO_SCORE_CAP) * COMBO_SCORE_PER))
+    this.events.push({
+      t: 'kill', id: e.id, x: e.x, z: e.z, kind: e.kind, by: by.id,
+      combo: by.combo, milestone: this.kills % 10 === 0,
+    })
+    if (e.kind !== 'BOSS' && this.rng.chance(0.15)) {
+      this.pickups.push({ x: e.x, z: e.z, life: PICKUP_LIFE })
+    }
+    if (e.kind === 'BOSS') {
+      this.boss = null
+      this.finish(true)
+    }
+    const w = this.kills < WAVE2_KILLS ? 1 : this.kills < WAVE3_KILLS ? 2 : 3
+    if (w !== this.wave) this.startWave(w)
+  }
+
+  private finish(win: boolean): void {
+    if (this.over !== 0) return
+    this.over = win ? 1 : 2
+    this.events.push({ t: 'over', win, score: this.players.reduce((s, p) => s + p.score, 0), kills: this.kills })
+  }
+
+  /* ------------------------------------------------ waves & spawning ------------------------------------------------ */
+
+  private mkSeq(len: number): string {
+    let s = ''
+    for (let i = 0; i < len; i++) s += KEYS[this.rng.int(KEYS.length)]
+    return s
+  }
+
+  private startWave(w: number): void {
+    this.wave = w
+    this.events.push({ t: 'wave', w })
+    if (w === 3) {
+      // Clear the field, summon the Overlord.
+      for (const e of [...this.enemies]) {
+        this.enemies.splice(this.enemies.indexOf(e), 1)
+        for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
+      }
+      const b = this.spawnEnemy('BOSS', 0, -20)
+      this.boss = b
+      this.bossPhase = 1
+      this.events.push({ t: 'boss', hp: b.hp, max: b.maxhp })
+      this.events.push({ t: 'seq', id: b.id, seq: b.seq, kind: b.kind })
+    }
+  }
+
+  private spawnEnemy(kind: EnemyKind, cx: number, cz: number): Enemy {
+    let x: number
+    let z: number
+    if (kind === 'BOSS') {
+      x = cx
+      z = cz
+    } else {
+      let tries = 0
+      do {
+        const a = this.rng.next() * Math.PI * 2
+        const r = 48 + this.rng.next() * 28
+        x = Math.max(-ARENA + 5, Math.min(ARENA - 5, cx + Math.cos(a) * r))
+        z = Math.max(-ARENA + 5, Math.min(ARENA - 5, cz + Math.sin(a) * r))
+        tries++
+      } while (tries < 10 && this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 34))
+    }
+    const seqLen = kind === 'BOSS' ? 5 : this.wave >= 2 ? 2 : 1
+    const e: Enemy = {
+      id: this.nextEnemyId++,
+      kind, x, z,
+      seq: this.mkSeq(seqLen),
+      ti: 0,
+      hp: kind === 'BOSS' ? 10 : 1,
+      maxhp: kind === 'BOSS' ? 10 : 1,
+      shootCd: 2 + this.rng.next() * 3,
+      patternCd: 4,
+      volleyLeft: 0, volleyT: 0, addCd: 8,
+    }
+    this.enemies.push(e)
+    this.spawnedIds.push(e.id)
+    this.events.push({ t: 'seq', id: e.id, seq: e.seq, kind: e.kind })
+    return e
+  }
+
+  private aliveCenter(): { x: number; z: number } {
+    const alive = this.players.filter(p => p.alive)
+    if (!alive.length) return { x: 0, z: 0 }
+    return {
+      x: alive.reduce((s, p) => s + p.x, 0) / alive.length,
+      z: alive.reduce((s, p) => s + p.z, 0) / alive.length,
+    }
+  }
+
+  private spawnToCap(): void {
+    // Wave 3 is the boss fight: adds come only from the boss's phase-3 pattern.
+    if (this.wave >= 3) return
+    const cap = enemyCap(this.wave, this.kills)
+    const alive = this.aliveCenter()
+    while (this.enemies.length < cap) {
+      this.spawnEnemy(pickKind(this.wave, this.rng), alive.x, alive.z)
+    }
+  }
+
+  /* ------------------------------------------------ boss patterns ------------------------------------------------ */
+
+  private fireBullet(x: number, z: number, dx: number, dz: number, speed: number): void {
+    this.bullets.push({ x, z, dx, dz, speed, life: BULLET_LIFE })
+    this.nextBulletId++
+  }
+
+  private bossPatterns(b: Enemy, dt: number): void {
+    // Shockwaves — every phase.
+    b.patternCd -= dt
+    if (b.patternCd <= 0) {
+      b.patternCd = Math.max(2.8, 5 - (1 - b.hp / b.maxhp) * 2)
+      this.shocks.push({ x: b.x, z: b.z, r: 2 })
+      this.events.push({ t: 'shock', x: b.x, z: b.z })
+    }
+    // Phase 2+: radial bullet rings after each shockwave.
+    if (this.bossPhase >= 2) {
+      b.volleyT -= dt
+      if (b.volleyT <= 0 && b.volleyLeft === 0) {
+        b.volleyT = 3.4
+        const n = 12
+        const off = this.rng.next() * Math.PI
+        for (let i = 0; i < n; i++) {
+          const a = off + (i / n) * Math.PI * 2
+          this.fireBullet(b.x, b.z, Math.sin(a), Math.cos(a), 24)
+        }
+        this.events.push({ t: 'shot', x: b.x, z: b.z, kind: b.kind })
+      }
+    }
+    // Phase 3: aimed triple volleys at the nearest player + grunt reinforcements.
+    if (this.bossPhase >= 3) {
+      b.addCd -= dt
+      if (b.addCd <= 0 && this.enemies.length < 5) {
+        b.addCd = 9
+        const alive = this.aliveCenter()
+        this.spawnEnemy('GRUNT', alive.x, alive.z)
+        this.spawnEnemy('GRUNT', alive.x, alive.z)
+      }
+      b.shootCd -= dt
+      if (b.shootCd <= 0) {
+        b.shootCd = 3.2
+        b.volleyLeft = 3
+        b.volleyT = 0
+      }
+      if (b.volleyLeft > 0) {
+        b.volleyT -= dt
+        if (b.volleyT <= 0) {
+          b.volleyT = 0.16
+          b.volleyLeft--
+          const tgt = this.nearestAlivePlayer(b.x, b.z)
+          if (tgt) {
+            const dx = tgt.x - b.x
+            const dz = tgt.z - b.z
+            const d = Math.hypot(dx, dz) || 1
+            this.fireBullet(b.x, b.z, dx / d, dz / d, 38)
+            this.events.push({ t: 'shot', x: b.x, z: b.z, kind: b.kind })
+          }
+        }
+      }
+    }
+  }
+
+  private nearestAlivePlayer(x: number, z: number): PlayerState | null {
+    let best: PlayerState | null = null
+    let bd = Infinity
+    for (const p of this.players) {
+      if (!p.alive) continue
+      const d = Math.hypot(p.x - x, p.z - z)
+      if (d < bd) { bd = d; best = p }
+    }
+    return best
+  }
+
+  /* ------------------------------------------------ main step ------------------------------------------------ */
+
+  step(dt: number, inputs: InputState[]): void {
+    if (this.over !== 0) return
+    this.time += dt
+    this.runClock += dt
+
+    // 1. Players: typed keys first (snappy), then movement.
+    for (let i = 0; i < this.players.length; i++) {
+      const p = this.players[i]
+      const inp = inputs[i] ?? emptyInput()
+      if (!p.alive) continue
+      if (inp.key) this.typeKey(p.id, inp.key)
+      p.inv = Math.max(0, p.inv - dt)
+      if (p.comboT > 0) {
+        p.comboT -= dt
+        if (p.comboT <= 0 && p.combo > 0) p.combo = 0
+      }
+      movePlayerBody(p, inp, dt, MOVE_CTX, this.comboSpeed(p))
+    }
+
+    const sm = this.threat()
+
+    // 2. Enemies: separation, seek, attacks.
+    for (const e of this.enemies) {
+      const def = KINDS[e.kind]
+      const tgt = this.nearestAlivePlayer(e.x, e.z)
+      if (!tgt) continue
+      const dx = tgt.x - e.x
+      const dz = tgt.z - e.z
+      const dist = Math.hypot(dx, dz) || 1
+      const go = !(def.boss && dist < 24)
+      if (go) {
+        const sp = def.speed * sm
+        e.x += (dx / dist) * sp * dt
+        e.z += (dz / dist) * sp * dt
+        pushOutOfObstacles(e, def.radius * 0.6, OBSTACLES)
+        e.x = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.x))
+        e.z = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.z))
+      }
+      // Elite aimed shots.
+      if (def.shoot) {
+        e.shootCd -= dt
+        if (dist < 62 && e.shootCd <= 0) {
+          e.shootCd = 3 + this.rng.next() * 2.2
+          this.fireBullet(e.x + (dx / dist) * 3, e.z + (dz / dist) * 3, dx / dist, dz / dist, 34)
+          this.events.push({ t: 'shot', x: e.x, z: e.z, kind: e.kind })
+        }
+      }
+      if (def.boss) this.bossPatterns(e, dt)
+      // Contact damage.
+      if (dist < PLAYER_RADIUS + def.radius && tgt.inv <= 0) {
+        this.hurtPlayer(tgt)
+        if (!def.boss) {
+          const i = this.enemies.indexOf(e)
+          if (i >= 0) this.enemies.splice(i, 1)
+          for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
+        }
+      }
+    }
+
+    // 2b. Enemy separation (soft push so they don't stack into one column).
+    for (let i = 0; i < this.enemies.length; i++) {
+      const a = this.enemies[i]!
+      const ra = KINDS[a.kind].radius
+      for (let j = i + 1; j < this.enemies.length; j++) {
+        const b = this.enemies[j]!
+        const rb = KINDS[b.kind].radius
+        const min = ra + rb
+        const dx = b.x - a.x
+        const dz = b.z - a.z
+        const d2 = dx * dx + dz * dz
+        if (d2 > 0.01 && d2 < min * min) {
+          const d = Math.sqrt(d2)
+          const push = ((min - d) / d) * 0.5
+          a.x -= dx * push; a.z -= dz * push
+          b.x += dx * push; b.z += dz * push
+        }
+      }
+    }
+
+    // 3. Bullets.
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i]!
+      b.x += b.dx * b.speed * dt
+      b.z += b.dz * b.speed * dt
+      b.life -= dt
+      let dead = b.life <= 0 || Math.abs(b.x) > ARENA || Math.abs(b.z) > ARENA || circleHitsObstacle(b.x, b.z, 0.4, OBSTACLES)
+      if (!dead) {
+        for (const p of this.players) {
+          if (!p.alive || p.inv > 0) continue
+          if (Math.hypot(b.x - p.x, b.z - p.z) < PLAYER_RADIUS + 0.5 && p.y <= 2) {
+            this.hurtPlayer(p)
+            dead = true
+            break
+          }
+        }
+      }
+      if (dead) this.bullets.splice(i, 1)
+    }
+
+    // 4. Shockwaves (jump to dodge: they only hit below y 1.6).
+    for (let i = this.shocks.length - 1; i >= 0; i--) {
+      const s = this.shocks[i]!
+      s.r += 26 * dt
+      let hit = false
+      for (const p of this.players) {
+        if (!p.alive || p.inv > 0 || p.y >= 1.6) continue
+        if (Math.abs(Math.hypot(p.x - s.x, p.z - s.z) - s.r) < s.r * 0.03 + 1.6) {
+          this.hurtPlayer(p)
+          hit = true
+          break
+        }
+      }
+      if (hit || s.r > 150) this.shocks.splice(i, 1)
+    }
+
+    // 5. Pickups.
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const pk = this.pickups[i]!
+      pk.life -= dt
+      let taken = false
+      for (const p of this.players) {
+        if (!p.alive || p.lives >= LIVES_MAX) continue
+        if (Math.hypot(pk.x - p.x, pk.z - p.z) < PLAYER_RADIUS + 1.8 && p.y < 3.5) {
+          p.lives++
+          this.events.push({ t: 'pickup', p: p.id, x: pk.x, z: pk.z })
+          taken = true
+          break
+        }
+      }
+      if (taken || pk.life <= 0) this.pickups.splice(i, 1)
+    }
+
+    // 6. Spawning.
+    this.spawnToCap()
+
+    // 7. Lose condition.
+    if (this.players.every(p => !p.alive)) this.finish(false)
+  }
+
+  private hurtPlayer(p: PlayerState): void {
+    p.lives--
+    p.inv = INV_TIME
+    p.combo = 0
+    p.comboT = 0
+    this.events.push({ t: 'hurt', p: p.id, x: p.x, z: p.z })
+    if (p.lives <= 0) {
+      p.alive = false
+      this.events.push({ t: 'death', p: p.id, x: p.x, z: p.z })
+    }
+  }
+
+  /* ------------------------------------------------ snapshots & hashing ------------------------------------------------ */
+
+  snapshot(): Snapshot {
+    const ps = this.players.map(p => [
+      Math.round(p.x * 100) / 100, Math.round(p.z * 100) / 100, Math.round(p.y * 100) / 100,
+      Math.round(p.ang * 1000) / 1000, p.lives, Math.round(p.inv * 100) / 100,
+      p.score, p.combo, p.alive ? 1 : 0,
+      p.correct, p.wrong, p.bestCombo, p.kills,
+    ] as Snapshot['ps'][number])
+    const kindIdx = (k: EnemyKind) => (k === 'RUNNER' ? 0 : k === 'GRUNT' ? 1 : k === 'ELITE' ? 2 : 3)
+    const es = this.enemies.map(e => [
+      e.id, kindIdx(e.kind), Math.round(e.x * 100) / 100, Math.round(e.z * 100) / 100,
+      e.ti, e.hp, e.maxhp, 1,
+    ] as Snapshot['es'][number])
+    return {
+      v: 1, t: this.time, tm: Math.round(this.runClock * 100) / 100,
+      w: this.wave, k: this.kills, ov: this.over,
+      ps, es,
+      bs: this.bullets.map(b => [
+        Math.round(b.x * 100) / 100, Math.round(b.z * 100) / 100,
+        Math.round(b.dx * 1000) / 1000, Math.round(b.dz * 1000) / 1000,
+      ] as Snapshot['bs'][number]),
+      ss: this.shocks.map(s => [Math.round(s.x * 10) / 10, Math.round(s.z * 10) / 10, Math.round(s.r * 10) / 10] as Snapshot['ss'][number]),
+      pk: this.pickups.map(p => [Math.round(p.x * 10) / 10, Math.round(p.z * 10) / 10] as Snapshot['pk'][number]),
+      bub: this.bubbles.map(b => [Math.round(b.x), Math.round(b.z), Math.round(b.r)] as Snapshot['bub'][number]),
+      bh: this.boss ? this.boss.hp : 0,
+      bmx: this.boss ? this.boss.maxhp : 0,
+    }
+  }
+
+  /** Folds state into a hash — used by determinism unit tests. */
+  hash(): string {
+    let h = 2166136261
+    const mix = (n: number) => {
+      h ^= Math.imul(n | 0, 16777619)
+      h = Math.imul(h ^ (h >>> 13), 0x5bd1e995)
+    }
+    mix(this.kills); mix(this.wave); mix(this.enemies.length)
+    for (const p of this.players) { mix(p.x * 64); mix(p.z * 64); mix(p.score); mix(p.lives) }
+    for (const e of this.enemies) { mix(e.id); mix(e.x * 64); mix(e.z * 64); mix(e.ti) }
+    for (const b of this.bullets) { mix(b.x * 64); mix(b.z * 64) }
+    return (h >>> 0).toString(16)
+  }
+
+  /* ------------------------------------------------ test hooks (used by unit tests only) ------------------------------------------------ */
+
+  /** Directly kill N enemies without touching the field (drives wave transitions). */
+  debugAddKills(n: number, by = 0): void {
+    this.kills += n
+    this.players[by]!.kills += n
+    this.players[by]!.score += n * 100
+    const w = this.kills < WAVE2_KILLS ? 1 : this.kills < WAVE3_KILLS ? 2 : 3
+    if (w !== this.wave) this.startWave(w)
+  }
+
+  /** Type a key aimed at a specific enemy id, bypassing nearest-match search. */
+  debugTypeAt(pid: number, ch: string, enemyId: number): KeyResult {
+    const p = this.players[pid]!
+    const e = this.enemies.find(x => x.id === enemyId)
+    if (!e || !p.alive || this.over !== 0 || !KEYS.includes(ch)) return 'none'
+    if (e.seq[e.ti] !== ch) {
+      e.ti = 0
+      p.lockId = -1
+      this.miss(p)
+      return 'miss'
+    }
+    p.lockId = e.id
+    p.correct++
+    p.combo++
+    p.comboT = COMBO_WINDOW
+    p.bestCombo = Math.max(p.bestCombo, p.combo)
+    e.ti++
+    if (e.ti >= e.seq.length) {
+      this.completeSequence(p, e)
+      return 'complete'
+    }
+    return 'advance'
+  }
+}
