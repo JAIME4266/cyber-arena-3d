@@ -1,4 +1,4 @@
-# CYBER ARENA 3D — ELITE
+# CYBER ARENA 3D — REDEFINED
 
 A typing-combat arena shooter. Enemies close in — you kill them by typing the 
 letters above their heads while running, jumping and dashing around a neon
