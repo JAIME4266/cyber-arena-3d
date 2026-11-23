@@ -6,6 +6,7 @@
       "name": "cyber-arena-3d",
       "dependencies": {
         "@trystero-p2p/mqtt": "0.27.0",
+        "@trystero-p2p/nostr": "0.27.0",
         "@trystero-p2p/torrent": "0.27.0",
         "three": "^0.187.0",
       },
@@ -142,6 +143,8 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.2.6", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || 2.0.0-beta.2", "@emnapi/runtime": "^1.7.1 || 2.0.0-beta.2" } }, "sha512-mRyDmEw9/fCDXCGfL1sbgIw/GUK0PVxRW4YwgPN61F3LQ+fSyoBFarJVzgGyhF6kRzEQZ0FejDqm4WLXSeqQmw=="],
 
+    "@noble/secp256k1": ["@noble/secp256k1@3.2.0", "", {}, "sha512-Z3ZAWOTxJ0EuTuZTi7Y69iK7GgrLHh8sgm45lVDhg/b3Nk1TpAiKhick2KkZisHuupeepSkyIydN/J459SdX1w=="],
+
     "@oxc-project/types": ["@oxc-project/types@0.156.0", "", {}, "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw=="],
 
     "@playwright/test": ["@playwright/test@1.65.1", "", { "dependencies": { "playwright": "1.65.1" }, "bin": { "playwright": "cli.js" } }, "sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw=="],
@@ -183,6 +186,8 @@
     "@trystero-p2p/core": ["@trystero-p2p/core@0.27.0", "", {}, "sha512-8e85VEYLMOUSwBZDr9D+StbMrRYQRWn1egWvgdqHG1OwO//eZEwG9CvslY60D+Yqnq8XhkDobuIdXdBjNu/gnA=="],
 
     "@trystero-p2p/mqtt": ["@trystero-p2p/mqtt@0.27.0", "", { "dependencies": { "@trystero-p2p/core": "0.27.0", "mqtt": "^5.16.1" } }, "sha512-chZq7Ms1vvzPHNYtchQGmrjpY2jU0w/svHY3CRx0ugw1fEimfxR+sHn9uVisAV8IG7RBcoemRG+oYBwpl1xPeQ=="],
+
+    "@trystero-p2p/nostr": ["@trystero-p2p/nostr@0.27.0", "", { "dependencies": { "@noble/secp256k1": "^3.2.0", "@trystero-p2p/core": "0.27.0" } }, "sha512-ZkuF64wCwtibGVnKzhrJXsq7DbrT/yNbaeUT9/hUcVZ1SiDAbjSQ5KzJh1lNgnUTKvSG00dqO4hNPbf4KuLuAw=="],
 
     "@trystero-p2p/torrent": ["@trystero-p2p/torrent@0.27.0", "", { "dependencies": { "@trystero-p2p/core": "0.27.0" } }, "sha512-yEaJi0oFxAXJzetsifnPITL2MOvFryG7e3aIzrq8U2sm4jZi5Vyirx94FSFghYHrUpjCpH+afGo61dD8CRWHcQ=="],
 
