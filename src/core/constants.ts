@@ -3,8 +3,12 @@
 export const VERSION = '2.2.0'
 export const GAME_ID = 'cyber-arena-3d-elite'
 
-/** Home-row combat keys (US QWERTY). */
-export const KEYS: readonly string[] = [...'ASDFGHJKL;\',']
+/** Combat keys expand as the adaptive curriculum unlocks reaches. */
+export const KEYS: readonly string[] = [
+  ...'ASDFGHJKL;',
+  ...'EIRU',
+  ...'BCMNOPQTVWXYZ',
+]
 
 /** Arena half-size (playfield spans -90..90 on X and Z). */
 export const ARENA = 90

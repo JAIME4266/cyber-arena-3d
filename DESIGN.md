@@ -10,6 +10,7 @@
 | --- | --- |
 | 2.1.0 | Full de-slop: cyberpunk → real-world live-fire training range ("RANGE HOT"). |
 | 2.2.0 | Combat physics 2.0: dynamic ordnance (explosive barrels, crates), chain reactions, mortar ballistics, ragdoll deaths, momentum movement — same deterministic 60 Hz core. |
+| 2.3.0 | Touch-typing curriculum: anchored home-row combat, progressive real-word targets, and live WPM-scaled enemy pace. |
 
 ## 1. Discovery
 

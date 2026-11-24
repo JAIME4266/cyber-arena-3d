@@ -176,11 +176,15 @@ export class Session {
       return
     }
     const k = e.key.toLowerCase()
-    if (k in { arrowup: 1, arrowdown: 1, arrowleft: 1, arrowright: 1, ' ': 1 }) {
+    if (k in { arrowup: 1, arrowdown: 1, arrowleft: 1, arrowright: 1 }) {
+      e.preventDefault()
+      if (!this.paused) this.cfg.overlay.toast('HOME ROW ANCHORED — MOVEMENT IS AUTOMATIC', 'info')
+      return
+    }
+    if (k === ' ') {
       e.preventDefault()
       if (this.paused) return
-      if (k === ' ') this.jumpQueued = true
-      else this.held.add(k)
+      this.jumpQueued = true
       return
     }
     if (e.key === 'Shift') {
@@ -488,7 +492,7 @@ export class Session {
       case 'wave': {
         this.cfg.audio.sfx('wave')
         const p = vm?.players[0]
-        this.vfx.text(e.w === 2 ? 'WAVE 2: GUNNERS INBOUND' : 'WAVE UP', p?.x ?? 0, 9, p?.z ?? 0)
+        this.vfx.text(e.w === 2 ? 'WAVE 2: INDEX REACHES UNLOCKED' : 'WAVE UP', p?.x ?? 0, 9, p?.z ?? 0)
         break
       }
       case 'boss': {

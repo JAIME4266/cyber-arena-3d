@@ -27,6 +27,8 @@ import type {
   Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, PhysProp, Shock, SimEvent, Snapshot, Mortar,
 } from './types'
 import { emptyInput } from './types'
+import { adaptiveEnemySpeedScale, selectTrainingWord } from './typing'
+import { wpm } from './stats'
 
 export interface MoveCtx {
   obstacles: readonly Obstacle[]
@@ -306,6 +308,14 @@ export class Sim {
     return Math.min(COMBO_SPEED_MAX, p.combo * COMBO_SPEED_PER)
   }
 
+  averageTypingWpm(): number {
+    const alive = this.players.filter(p => p.alive)
+    if (!alive.length) return 0
+    const elapsedMs = this.runClock * 1000
+    const values = alive.map(p => wpm(p.correct, elapsedMs))
+    return values.reduce((sum, value) => sum + value, 0) / values.length
+  }
+
   /* ------------------------------------------------ typing (combat) ------------------------------------------------ */
 
   typeKey(pid: number, ch: string): KeyResult {
@@ -372,7 +382,7 @@ export class Sim {
       // Boss survives: new sequence, maybe a phase change.
       const oldPhase = this.bossPhase
       this.bossPhase = e.hp >= 7 ? 1 : e.hp >= 4 ? 2 : 3
-      e.seq = this.mkSeq(e.hp >= 7 ? 2 : e.hp >= 4 ? 3 : 4)
+      e.seq = this.mkSeq(e.hp >= 7 ? 2 : e.hp >= 4 ? 3 : 4, 'BOSS')
       e.ti = 0
       this.events.push({ t: 'boss', hp: e.hp, max: e.maxhp })
       this.events.push({ t: 'seq', id: e.id, seq: e.seq, kind: e.kind })
@@ -513,10 +523,9 @@ export class Sim {
 
   /* ------------------------------------------------ waves & spawning ------------------------------------------------ */
 
-  private mkSeq(len: number): string {
-    let s = ''
-    for (let i = 0; i < len; i++) s += KEYS[this.rng.int(KEYS.length)]
-    return s
+  private mkSeq(len: number, kind: EnemyKind): string {
+    const word = selectTrainingWord(kind, this.kills, this.rng.int(1000))
+    return word.slice(0, len)
   }
 
   private startWave(w: number): void {
@@ -556,7 +565,7 @@ export class Sim {
     const e: Enemy = {
       id: this.nextEnemyId++,
       kind, x, z, y: 0, vy: 0, kx: 0, kz: 0, stag: 0,
-      seq: this.mkSeq(seqLen),
+      seq: this.mkSeq(seqLen, kind),
       ti: 0,
       hp: kind === 'BOSS' ? 10 : 1,
       maxhp: kind === 'BOSS' ? 10 : 1,
@@ -684,7 +693,10 @@ export class Sim {
     // 1. Players: typed keys first (snappy), then movement.
     for (let i = 0; i < this.players.length; i++) {
       const p = this.players[i]
-      const inp = inputs[i] ?? emptyInput()
+      const rawInput = inputs[i] ?? emptyInput()
+      // Touch-typing anchor: directional movement cannot compete with ten-finger combat.
+      // Jump and sprint remain, but arrow/WASD steering is intentionally disabled.
+      const inp = { ...rawInput, mx: 0, mz: 0 }
       if (!p.alive) continue
       if (inp.key) this.typeKey(p.id, inp.key)
       p.inv = Math.max(0, p.inv - dt)
@@ -718,7 +730,7 @@ export class Sim {
       }
     }
 
-    const sm = this.threat()
+    const sm = this.threat() * adaptiveEnemySpeedScale(this.averageTypingWpm())
 
     // 2. Enemies: physics state (knockback, airborne, stagger), then seek & attack.
     for (const e of this.enemies) {
