@@ -178,7 +178,7 @@ export class Session {
     const k = e.key.toLowerCase()
     if (k in { arrowup: 1, arrowdown: 1, arrowleft: 1, arrowright: 1 }) {
       e.preventDefault()
-      if (!this.paused) this.cfg.overlay.toast('HOME ROW ANCHORED — MOVEMENT IS AUTOMATIC', 'info')
+      if (!this.paused) this.screens.toast('HOME ROW ANCHORED — MOVEMENT IS AUTOMATIC', 'info')
       return
     }
     if (k === ' ') {
