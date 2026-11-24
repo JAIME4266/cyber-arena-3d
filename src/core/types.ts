@@ -25,6 +25,12 @@ export interface PlayerState {
   z: number
   y: number
   vy: number
+  /** Persistent horizontal velocity — momentum movement (combat physics). */
+  vx: number
+  vz: number
+  /** Knockback velocity, decays exponentially; added to vx/vz. */
+  kx: number
+  kz: number
   ang: number
   facing: number
   lives: number
@@ -52,6 +58,13 @@ export interface Enemy {
   kind: EnemyKind
   x: number
   z: number
+  /** Airborne height — launched by blasts (combat physics). */
+  y: number
+  vy: number
+  /** Knockback velocity (decays) + stagger timer (no seek/shoot). */
+  kx: number
+  kz: number
+  stag: number
   seq: string
   ti: number
   hp: number
@@ -61,6 +74,7 @@ export interface Enemy {
   volleyLeft: number
   volleyT: number
   addCd: number
+  mortarCd: number
 }
 
 export interface Bullet { x: number; z: number; dx: number; dz: number; speed: number; life: number }
@@ -68,8 +82,47 @@ export interface Shock { x: number; z: number; r: number }
 export interface Pickup { x: number; z: number; life: number }
 export interface Bubble { x: number; z: number; r: number }
 
+/* ---------- Combat physics: dynamic props & ballistic shells ---------- */
+
+export type PropKind = 'CRATE' | 'BARREL'
+
+/** A dynamic rigid body in the arena: supply crates (light, pushable) and
+ * barrels (heavy; explosive ones detonate and chain-react). */
+export interface PhysProp {
+  id: number
+  kind: PropKind
+  /** Explosive barrel (rust paint + FLAMMABLE stencil); inert = water drum. */
+  expl: boolean
+  x: number
+  z: number
+  y: number
+  vx: number
+  vz: number
+  vy: number
+  /** Accumulated roll/tumble in radians (view orients the axis). */
+  rot: number
+  r: number
+  hp: number
+  /** > 0 → countdown to detonation (chain-reaction delay). */
+  fuse: number
+  alive: boolean
+  sleepT: number
+}
+
+/** Boss mortar shell: parabolic ballistic integration, impact = blast. */
+export interface Mortar {
+  x: number
+  z: number
+  y: number
+  vx: number
+  vz: number
+  vy: number
+}
+
 export type SimEvent =
-  | { t: 'kill'; id: number; x: number; z: number; kind: EnemyKind; by: number; combo: number; milestone: boolean }
+  | { t: 'kill'; id: number; x: number; z: number; kind: EnemyKind; by: number; combo: number; milestone: boolean
+      /** Ragdoll launch: impulse direction (normalized-ish), spin rate, lift. */
+      dx?: number; dz?: number; spin?: number; vy?: number }
   | { t: 'hurt'; p: number; x: number; z: number }
   | { t: 'death'; p: number; x: number; z: number }
   | { t: 'wave'; w: number }
@@ -79,6 +132,8 @@ export type SimEvent =
   | { t: 'pickup'; p: number; x: number; z: number }
   | { t: 'shot'; x: number; z: number; kind: EnemyKind }
   | { t: 'shock'; x: number; z: number }
+  | { t: 'blast'; x: number; z: number; r: number }
+  | { t: 'mortar'; x: number; z: number; vx: number; vz: number; vy: number }
   | { t: 'over'; win: boolean; score: number; kills: number }
 
 export type KeyResult = 'none' | 'advance' | 'complete' | 'miss'
@@ -108,10 +163,21 @@ export interface ViewEnemy {
   kind: EnemyKind
   x: number
   z: number
+  y: number
   ti: number
   seq: string
   hp: number
   maxhp: number
+}
+
+export interface ViewProp {
+  id: number
+  kind: PropKind
+  expl: boolean
+  x: number
+  z: number
+  y: number
+  rot: number
 }
 
 export interface ViewBullet { x: number; z: number; dx: number; dz: number }
@@ -129,6 +195,7 @@ export interface ViewModel {
   shocks: ViewShock[]
   pickups: ViewPickup[]
   bubbles: Bubble[]
+  props: ViewProp[]
   bossHp: number
   bossMax: number
   /** Which enemy the local player is locked onto (-1 = none). */
@@ -144,7 +211,11 @@ export type SnapPlayer = [
 // [x, z, y, ang, lives, inv, score, combo, alive, correct, wrong, bestCombo, kills]
 
 export type SnapEnemy = [number, number, number, number, number, number, number, number]
-// [id, kindIdx, x, z, ti, hp, maxhp, moving]
+// [id, kindIdx, x, z, ti, hp, maxhp, y] — slot 7 was "moving" (unused by the
+// guest view); repurposed for airborne height so launched enemies render.
+
+/** Dynamic props: [id, kindIdx (0 crate / 1 barrel / 2 explosive barrel), x, z, y, rot]. */
+export type SnapProp = [number, number, number, number, number, number]
 
 export interface Snapshot {
   v: 1
@@ -159,6 +230,8 @@ export interface Snapshot {
   ss: [number, number, number][]
   pk: [number, number][]
   bub: [number, number, number][]
+  /** Dynamic combat-physics props (optional for protocol compatibility). */
+  pr?: SnapProp[]
   bh: number
   bmx: number
 }

@@ -1,6 +1,6 @@
 /** Global tuning constants. Pure data — no runtime imports. */
 
-export const VERSION = '2.1.0'
+export const VERSION = '2.2.0'
 export const GAME_ID = 'cyber-arena-3d-elite'
 
 /** Home-row combat keys (US QWERTY). */
@@ -79,6 +79,46 @@ export const OBSTACLES: readonly Obstacle[] = [
 
 export const BULLET_LIFE = 4
 export const PICKUP_LIFE = 25
+
+/*
+ * Combat physics 2.0 — impulse dynamics in the fixed 60 Hz step.
+ *
+ * Tuned per the physics-tuning discipline: tunnelling guard
+ * (PROP_MAX_SPEED / 60 = 0.63 < thinnest prop radius 1.15), mass ratios
+ * within 1:10, per-kind friction/restitution, sleeping thresholds, and a
+ * named collision layer matrix (see src/core/physics.ts header).
+ */
+export const PLAYER_ACCEL = 11 // ground steering rate (1/s)
+export const PLAYER_AIR_ACCEL = 4.2 // reduced air control
+export const PLAYER_KNOCK_DECAY = 5.5 // knockback velocity decay (1/s)
+export const LAND_BOUNCE = 0.24 // landing rebound below this speed fraction
+export const PLAYER_PUSH_FORCE = 17 // player shoves crates
+
+export const PROP_FRICTION = 2.3 // ground drag (1/s)
+export const PROP_BOUNCE = 0.36 // restitution vs walls/ground
+export const PROP_MAX_SPEED = 38 // tunnelling guard
+export const PROP_SLEEP_V = 0.4 // below this speed a settled body sleeps…
+export const PROP_SLEEP_T = 0.6 // …after this many seconds
+export const BARREL_R = 1.15
+export const CRATE_R = 1.9
+export const BARRELS_EXPLOSIVE = 6
+export const BARRELS_INERT = 3
+export const CRATES_N = 5
+
+export const BLAST_RADIUS = 16
+export const BLAST_KILL_RADIUS = 14.5
+export const BLAST_POWER = 34 // horizontal impulse at epicenter
+export const BLAST_LAUNCH = 19 // vertical launch at epicenter
+export const CHAIN_DELAY_MIN = 0.12
+export const CHAIN_DELAY_RAND = 0.14
+export const KILL_FUSE_RADIUS = 8 // kills this close damage explosive barrels
+
+export const MORTAR_VY = 38
+export const MORTAR_CD = 6.5
+export const MORTAR_RADIUS = 12
+export const MORTAR_KILL_RADIUS = 9
+export const MORTAR_POWER = 24
+export const MORTAR_LAUNCH = 14
 
 export const KILL_MSGS: readonly string[] = [
   'GOOD HIT', 'CENTER MASS', 'STEEL DOWN', 'DOUBLE TAP',

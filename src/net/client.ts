@@ -15,7 +15,7 @@ export class NetClient {
   private snaps: Snapshot[] = []
   private readonly seqs = new Map<number, { seq: string; kind: EnemyKind }>()
   private readonly self = {
-    id: 1, name: 'YOU', alive: true, x: 4, z: 0, y: 0, vy: 0, ang: 0, facing: 0,
+    id: 1, name: 'YOU', alive: true, x: 4, z: 0, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0, ang: 0, facing: 0,
     lives: 3, inv: 0, score: 0, kills: 0, combo: 0, comboT: 0, bestCombo: 0,
     correct: 0, wrong: 0, dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: 1,
     moving: false, lockId: -1, slowed: false,
@@ -102,6 +102,22 @@ export class NetClient {
     movePlayerBody(this.self, inp, dt, { obstacles: OBSTACLES, bubbles, arena: 90 }, 0)
   }
 
+  /**
+   * Local blast prediction: the authoritative impulse arrives with the next
+   * snapshot, but the launch is felt now (game-feel: feedback latency 0).
+   */
+  applyBlast(cx: number, cz: number, radius: number, power: number, launch: number): void {
+    const dx = this.self.x - cx
+    const dz = this.self.z - cz
+    const d = Math.hypot(dx, dz)
+    if (d > radius) return
+    const falloff = 1 - d / radius
+    const inv = d > 0.001 ? 1 / d : 0
+    this.self.kx += dx * inv * power * (0.35 + falloff) * 0.6
+    this.self.kz += dz * inv * power * (0.35 + falloff) * 0.6
+    this.self.vy = Math.max(this.self.vy, launch * falloff)
+  }
+
   /** Interpolated view for the renderer; local player first. */
   view(): ViewModel {
     const latest = this.snaps[this.snaps.length - 1]
@@ -125,7 +141,7 @@ export class NetClient {
 
     const snapSelf = s1.ps[1] // newest authoritative self
     if (snapSelf) {
-      const [x, z, , , lives, inv, score, combo, alive, correct, wrong, bestCombo, kills] = snapSelf
+      const [x, z, y, , lives, inv, score, combo, alive, correct, wrong, bestCombo, kills] = snapSelf
       this.self.lives = lives
       this.self.inv = inv
       this.self.score = score
@@ -139,9 +155,18 @@ export class NetClient {
       if (Math.hypot(this.self.x - x, this.self.z - z) > 2.2 || !this.self.alive) {
         this.self.x = x
         this.self.z = z
+        this.self.y = y
+        this.self.vy = 0
+        this.self.vx = 0
+        this.self.vz = 0
       } else {
         this.self.x += (x - this.self.x) * 0.12
         this.self.z += (z - this.self.z) * 0.12
+        // Vertical: only correct when the host disagrees hard (launches).
+        if (Math.abs(this.self.y - y) > 1.6) {
+          this.self.y = y
+          this.self.vy = 0
+        }
       }
     }
 
@@ -175,12 +200,23 @@ export class NetClient {
         kind: ENEMY_KIND_ORDER[e[1]] ?? 'GRUNT',
         x: e[2],
         z: e[3],
+        y: e[7],
         ti: e[4],
         seq: meta.seq,
         hp: e[5],
         maxhp: e[6],
       }]
     })
+
+    const props = (s1.pr ?? []).map(p => ({
+      id: p[0],
+      kind: (p[1] === 0 ? 'CRATE' : 'BARREL') as 'CRATE' | 'BARREL',
+      expl: p[1] === 2,
+      x: p[2],
+      z: p[3],
+      y: p[4],
+      rot: p[5],
+    }))
 
     return {
       time: s1.tm,
@@ -196,6 +232,7 @@ export class NetClient {
       shocks: s1.ss.map(([x, z, r]) => ({ x, z, r })),
       pickups: s1.pk.map(([x, z]) => ({ x, z })),
       bubbles: s1.bub.map(([x, z, r]) => ({ x, z, r })),
+      props,
       bossHp: s1.bh,
       bossMax: s1.bmx,
       lockId: -1,
@@ -206,7 +243,7 @@ export class NetClient {
     return {
       time: 0, wave: 1, kills: 0, over: 0,
       players: [{ id: 1, x: this.self.x, z: this.self.z, y: 0, ang: 0, lives: 3, inv: 0, score: 0, combo: 0, alive: true, moving: false, dashing: false, dashCd: 0, slowed: false, hurtFlash: 0 }],
-      enemies: [], bullets: [], shocks: [], pickups: [], bubbles: [],
+      enemies: [], bullets: [], shocks: [], pickups: [], bubbles: [], props: [],
       bossHp: 0, bossMax: 0, lockId: -1,
     }
   }

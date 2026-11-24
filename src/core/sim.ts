@@ -11,15 +11,20 @@
  * golden, and the co-op host authoritative without drift.
  */
 import { RNG } from './rng'
+import { blastImpulse, stepProps, wakeProp, PROP_MASS } from './physics'
 import {
   ARENA, BULLET_LIFE, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
   COMBO_WINDOW, DASH_CD, DASH_INV, DASH_MULT, DASH_TIME, GRAVITY, INV_TIME, JUMP_VY,
-  KEYS, KINDS, LIVES_MAX, OBSTACLES, PICKUP_LIFE, PLAYER_RADIUS, PLAYER_SPEED,
+  KEYS, KINDS, LIVES_MAX, OBSTACLES, PICKUP_LIFE, PLAYER_ACCEL, PLAYER_AIR_ACCEL, PLAYER_KNOCK_DECAY,
+  PLAYER_PUSH_FORCE, PLAYER_RADIUS, PLAYER_SPEED, LAND_BOUNCE,
   THREAT_BASE, THREAT_GAIN, THREAT_KILLS, THREAT_MAX, WAVE2_KILLS, WAVE3_KILLS,
+  BARREL_R, BLAST_KILL_RADIUS, BLAST_LAUNCH, BLAST_POWER, BLAST_RADIUS,
+  CHAIN_DELAY_MIN, CHAIN_DELAY_RAND, CRATE_R, KILL_FUSE_RADIUS,
+  MORTAR_CD, MORTAR_KILL_RADIUS, MORTAR_LAUNCH, MORTAR_POWER, MORTAR_RADIUS, MORTAR_VY,
   type EnemyKind, type Obstacle,
 } from './constants'
 import type {
-  Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, Shock, SimEvent, Snapshot,
+  Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, PhysProp, Shock, SimEvent, Snapshot, Mortar,
 } from './types'
 import { emptyInput } from './types'
 
@@ -65,13 +70,32 @@ const lerpAngle = (a: number, b: number, t: number): number =>
 /**
  * Shared movement body — used by the authoritative sim AND by the co-op
  * guest's local prediction, so both sides move with identical physics.
+ *
+ * Combat physics 2.0: momentum model. Input steers a persistent velocity
+ * (accel/decel curves, reduced air control) instead of teleporting speed;
+ * knockback velocity decays on top; landing hard bounces slightly. All
+ * integrated with the fixed dt only — frame-rate independent by construction.
  */
 export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx: MoveCtx, comboSpeed: number): void {
-  // Jump
+  // Knockback decay (exponential, dt-exact).
+  const kDecay = Math.max(0, 1 - PLAYER_KNOCK_DECAY * dt)
+  p.kx *= kDecay
+  p.kz *= kDecay
+
+  // Jump + gravity; a hard landing rebounds a fraction (impact feel).
   if (inp.jump && p.y <= 0.01) p.vy = JUMP_VY
+  const prevVy = p.vy
   p.vy -= GRAVITY * dt
-  p.y = Math.max(0, p.y + p.vy * dt)
-  if (p.y === 0) p.vy = 0
+  p.y += p.vy * dt
+  if (p.y < 0) {
+    if (prevVy < -JUMP_VY * 1.15) {
+      p.y = 0
+      p.vy = -prevVy * LAND_BOUNCE
+    } else {
+      p.y = 0
+      p.vy = 0
+    }
+  }
 
   // Dash
   p.dashCd = Math.max(0, p.dashCd - dt)
@@ -96,20 +120,26 @@ export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx:
   const want = Math.hypot(inp.mx, inp.mz) > 0
   p.moving = want
 
-  let vx = 0
-  let vz = 0
+  // Steering: accelerate a persistent velocity toward the wish velocity.
+  const grounded = p.y <= 0.01
+  const rate = grounded ? PLAYER_ACCEL : PLAYER_AIR_ACCEL
+  const a = 1 - Math.exp(-rate * dt)
+  let tvx = 0
+  let tvz = 0
   if (p.dashT > 0) {
-    vx = p.dashDirX * PLAYER_SPEED * DASH_MULT
-    vz = p.dashDirZ * PLAYER_SPEED * DASH_MULT
+    tvx = p.dashDirX * PLAYER_SPEED * DASH_MULT
+    tvz = p.dashDirZ * PLAYER_SPEED * DASH_MULT
   } else if (want) {
     const l = Math.hypot(inp.mx, inp.mz)
     const sp = PLAYER_SPEED * (1 + comboSpeed) * (slowed ? 0.5 : 1)
-    vx = (inp.mx / l) * sp
-    vz = (inp.mz / l) * sp
+    tvx = (inp.mx / l) * sp
+    tvz = (inp.mz / l) * sp
   }
+  p.vx += (tvx - p.vx) * a
+  p.vz += (tvz - p.vz) * a
 
-  const nx = p.x + vx * dt
-  const nz = p.z + vz * dt
+  const nx = p.x + (p.vx + p.kx) * dt
+  const nz = p.z + (p.vz + p.kz) * dt
   const lim = ctx.arena - 3
   if (!circleHitsObstacle(nx, p.z, PLAYER_RADIUS, ctx.obstacles)) p.x = Math.max(-lim, Math.min(lim, nx))
   if (!circleHitsObstacle(p.x, nz, PLAYER_RADIUS, ctx.obstacles)) p.z = Math.max(-lim, Math.min(lim, nz))
@@ -123,7 +153,7 @@ export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx:
 function makePlayer(id: number, name: string): PlayerState {
   return {
     id, name, alive: true,
-    x: id === 0 ? -4 : 4, z: 0, y: 0, vy: 0,
+    x: id === 0 ? -4 : 4, z: 0, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0,
     ang: id === 0 ? Math.PI / 2 : -Math.PI / 2, facing: 0,
     lives: LIVES_MAX, inv: 0, score: 0, kills: 0,
     combo: 0, comboT: 0, bestCombo: 0, correct: 0, wrong: 0,
@@ -162,6 +192,10 @@ export class Sim {
   pickups: Pickup[] = []
   bubbles: Bubble[] = []
   events: SimEvent[] = []
+  /** Dynamic combat-physics props (crates, barrels). */
+  props: PhysProp[] = []
+  /** Airborne mortar shells (boss ballistic barrage). */
+  mortars: Mortar[] = []
 
   time = 0
   runClock = 0
@@ -171,6 +205,7 @@ export class Sim {
   boss: Enemy | null = null
   bossPhase = 0
   private nextEnemyId = 1
+  private nextPropId = 1
   private nextBulletId = 0
   readonly bulletIds: number[] = []
   readonly spawnedIds: number[] = []
@@ -182,7 +217,67 @@ export class Sim {
     this.players = [makePlayer(0, opts.playerCount > 1 ? names[0] : names[0])]
     if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1]))
     this.rollBubbles()
+    this.rollProps()
     // Initial spawn wave happens on first step.
+  }
+
+  /**
+   * Deterministic ordnance layout, laid out like a real range: three
+   * stockpile clusters (explosive pairs + a water drum + a crate — close
+   * enough to chain) plus scattered singles across the mid-field.
+   */
+  private rollProps(): void {
+    this.props = []
+    const centers: Array<[number, number]> = []
+    const centerOk = (x: number, z: number): boolean =>
+      Math.hypot(x, z) > 18 && Math.hypot(x, z) < 44
+        && Math.hypot(x + 4, z) > 16 && Math.hypot(x - 4, z) > 16
+        && !circleHitsObstacle(x, z, 6, OBSTACLES)
+        && centers.every(c => Math.hypot(x - c[0], z - c[1]) > 26)
+        && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 8)
+    while (centers.length < 3) {
+      const x = this.rng.range(-1, 1) * 40
+      const z = this.rng.range(-1, 1) * 40
+      if (centerOk(x, z)) centers.push([x, z])
+    }
+    const add = (kind: 'BARREL' | 'CRATE', expl: boolean, x: number, z: number): void => {
+      const r = kind === 'BARREL' ? BARREL_R : CRATE_R
+      this.props.push({
+        id: this.nextPropId++, kind, expl,
+        x, z, y: 0, vx: 0, vz: 0, vy: 0,
+        rot: this.rng.next() * Math.PI * 2,
+        r, hp: 1, fuse: 0, alive: true, sleepT: 0,
+      })
+    }
+    for (const [cx, cz] of centers) {
+      // Explosive pair — close enough to detonate together.
+      add('BARREL', true, cx + this.rng.range(-2.2, 2.2), cz + this.rng.range(-2.2, 2.2))
+      add('BARREL', true, cx + this.rng.range(-3.4, 3.4), cz + this.rng.range(-3.4, 3.4))
+      add('BARREL', false, cx + this.rng.range(4.5, 6.5) * (this.rng.chance(0.5) ? 1 : -1), cz + this.rng.range(-5, 5))
+      add('CRATE', false, cx + this.rng.range(4.5, 6.5) * (this.rng.chance(0.5) ? 1 : -1), cz + this.rng.range(-5, 5))
+    }
+    // Scattered singles across the mid-field.
+    const scatter = (kind: 'BARREL' | 'CRATE', expl: boolean): void => {
+      const r = kind === 'BARREL' ? BARREL_R : CRATE_R
+      let x = 0
+      let z = 0
+      let tries = 0
+      let ok = false
+      while (tries++ < 50 && !ok) {
+        x = this.rng.range(-1, 1) * 58
+        z = this.rng.range(-1, 1) * 58
+        ok = Math.hypot(x, z) > 13
+          && !circleHitsObstacle(x, z, r + 2, OBSTACLES)
+          && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 3)
+          && this.props.every(p => Math.hypot(x - p.x, z - p.z) > 9)
+      }
+      add(kind, expl, x, z)
+    }
+    scatter('BARREL', false)
+    scatter('BARREL', false)
+    scatter('CRATE', false)
+    scatter('CRATE', false)
+    scatter('CRATE', false)
   }
 
   private rollBubbles(): void {
@@ -249,6 +344,15 @@ export class Sim {
     p.comboT = COMBO_WINDOW
     p.bestCombo = Math.max(p.bestCombo, p.combo)
     target.ti++
+    // Every landed letter is a hit: stagger the target back a step.
+    if (target.y <= 0.01) {
+      const dx = target.x - p.x
+      const dz = target.z - p.z
+      const d = Math.hypot(dx, dz) || 1
+      target.kx += (dx / d) * 2.4
+      target.kz += (dz / d) * 2.4
+      target.stag = Math.max(target.stag, 0.07)
+    }
     if (target.ti >= target.seq.length) {
       p.lockId = -1
       this.completeSequence(p, target)
@@ -278,18 +382,36 @@ export class Sim {
     this.killEnemy(e, p)
   }
 
-  private killEnemy(e: Enemy, by: PlayerState): void {
+  private killEnemy(e: Enemy, by: PlayerState | null): void {
     const i = this.enemies.indexOf(e)
     if (i < 0) return
     this.enemies.splice(i, 1)
     for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
     this.kills++
-    by.kills++
-    by.score += Math.round(KINDS[e.kind].value * (1 + Math.min(by.combo, COMBO_SCORE_CAP) * COMBO_SCORE_PER))
+    // Ragdoll launch: away from the shooter, spun by the impact.
+    const dx = by ? e.x - by.x : this.rng.range(-1, 1)
+    const dz = by ? e.z - by.z : this.rng.range(-1, 1)
+    const dl = Math.hypot(dx, dz) || 1
+    const spin = (4 + this.rng.next() * 5) * (this.rng.chance(0.5) ? -1 : 1)
+    const lift = 10 + this.rng.next() * 6 + (e.y > 0 ? e.vy * 0.4 : 0)
+    if (by) {
+      by.kills++
+      by.score += Math.round(KINDS[e.kind].value * (1 + Math.min(by.combo, COMBO_SCORE_CAP) * COMBO_SCORE_PER))
+    }
     this.events.push({
-      t: 'kill', id: e.id, x: e.x, z: e.z, kind: e.kind, by: by.id,
-      combo: by.combo, milestone: this.kills % 10 === 0,
+      t: 'kill', id: e.id, x: e.x, z: e.z, kind: e.kind, by: by ? by.id : -1,
+      combo: by ? by.combo : 0, milestone: this.kills % 10 === 0,
+      dx: Math.round((dx / dl) * 100) / 100, dz: Math.round((dz / dl) * 100) / 100,
+      spin: Math.round(spin * 10) / 10, vy: Math.round(lift * 10) / 10,
     })
+    // Kills near explosive ordnance damage it → delayed chain detonation.
+    for (const p of this.props) {
+      if (!p.alive || !p.expl || p.fuse > 0) continue
+      if (Math.hypot(p.x - e.x, p.z - e.z) < KILL_FUSE_RADIUS) {
+        p.hp--
+        if (p.hp <= 0) p.fuse = CHAIN_DELAY_MIN + this.rng.next() * CHAIN_DELAY_RAND
+      }
+    }
     if (e.kind !== 'BOSS' && this.rng.chance(0.15)) {
       this.pickups.push({ x: e.x, z: e.z, life: PICKUP_LIFE })
     }
@@ -299,6 +421,88 @@ export class Sim {
     }
     const w = this.kills < WAVE2_KILLS ? 1 : this.kills < WAVE3_KILLS ? 2 : 3
     if (w !== this.wave) this.startWave(w)
+  }
+
+  /* ------------------------------------------------ combat physics: blasts, chains, mortars ------------------------------------------------ */
+
+  /**
+   * Radial blast: kills non-boss enemies (credited to `by`), launches and
+   * staggers the rest, hurts + launches players, applies impulses to every
+   * dynamic prop, and lights the fuse on explosive barrels in range — chain
+   * reactions resolve over the following ticks (never recursively).
+   */
+  private applyBlast(
+    cx: number, cz: number, radius: number, killRadius: number, power: number, launch: number,
+    by: PlayerState | null,
+  ): void {
+    this.events.push({ t: 'blast', x: Math.round(cx * 10) / 10, z: Math.round(cz * 10) / 10, r: radius })
+
+    // Enemies: gather first, then kill (no mutation during iteration).
+    const victims: Enemy[] = []
+    for (const e of this.enemies) {
+      const imp = blastImpulse(e.x, e.z, cx, cz, radius, power, launch)
+      if (!imp || e.kind === 'BOSS') continue
+      e.kx += imp.ix * 0.55
+      e.kz += imp.iz * 0.55
+      e.vy = Math.max(e.vy, imp.lift)
+      e.y = Math.max(e.y, 0.01)
+      e.stag = Math.max(e.stag, 0.45)
+      if (Math.hypot(e.x - cx, e.z - cz) < killRadius) victims.push(e)
+    }
+    for (const e of victims) this.killEnemy(e, by)
+
+    // Players: hurt (unless invulnerable) + physical launch.
+    for (const p of this.players) {
+      if (!p.alive) continue
+      const imp = blastImpulse(p.x, p.z, cx, cz, radius, power, launch)
+      if (!imp) continue
+      p.kx += imp.ix * 0.6
+      p.kz += imp.iz * 0.6
+      p.vy = Math.max(p.vy, imp.lift)
+      if (imp.falloff > 0.25 && p.inv <= 0) this.hurtPlayer(p)
+    }
+
+    // Props: impulses + fuses for chained ordnance.
+    for (const p of this.props) {
+      if (!p.alive) continue
+      const imp = blastImpulse(p.x, p.z, cx, cz, radius, power * 1.15, launch * 1.1)
+      if (!imp) continue
+      wakeProp(p)
+      p.vx += imp.ix / PROP_MASS[p.kind]
+      p.vz += imp.iz / PROP_MASS[p.kind]
+      p.vy = Math.max(p.vy, imp.lift / PROP_MASS[p.kind] * 0.5)
+      if (p.expl && p.fuse <= 0 && imp.falloff > 0.2) {
+        p.hp--
+        if (p.hp <= 0) p.fuse = CHAIN_DELAY_MIN + this.rng.next() * CHAIN_DELAY_RAND
+      }
+    }
+  }
+
+  /** A barrel's fuse ran out: remove it and let the blast do the talking. */
+  private detonate(id: number): void {
+    const p = this.props.find(q => q.id === id)
+    if (!p || !p.alive) return
+    p.alive = false
+    this.applyBlast(p.x, p.z, BLAST_RADIUS, BLAST_KILL_RADIUS, BLAST_POWER, BLAST_LAUNCH, null)
+  }
+
+  /** Ballistic mortar barrage (boss phase 2+): lead the target, arc over cover. */
+  private fireMortar(from: Enemy, leadPlayer: PlayerState): void {
+    const flightT = (2 * MORTAR_VY) / GRAVITY
+    const tx = leadPlayer.x + leadPlayer.vx * flightT * 0.6
+    const tz = leadPlayer.z + leadPlayer.vz * flightT * 0.6
+    const m: Mortar = {
+      x: from.x, z: from.z, y: 4,
+      vx: (tx - from.x) / flightT,
+      vz: (tz - from.z) / flightT,
+      vy: MORTAR_VY,
+    }
+    this.mortars.push(m)
+    this.events.push({
+      t: 'mortar',
+      x: Math.round(m.x * 10) / 10, z: Math.round(m.z * 10) / 10,
+      vx: Math.round(m.vx * 100) / 100, vz: Math.round(m.vz * 100) / 100, vy: m.vy,
+    })
   }
 
   private finish(win: boolean): void {
@@ -351,14 +555,14 @@ export class Sim {
     const seqLen = kind === 'BOSS' ? 5 : this.wave >= 2 ? 2 : 1
     const e: Enemy = {
       id: this.nextEnemyId++,
-      kind, x, z,
+      kind, x, z, y: 0, vy: 0, kx: 0, kz: 0, stag: 0,
       seq: this.mkSeq(seqLen),
       ti: 0,
       hp: kind === 'BOSS' ? 10 : 1,
       maxhp: kind === 'BOSS' ? 10 : 1,
       shootCd: 2 + this.rng.next() * 3,
       patternCd: 4,
-      volleyLeft: 0, volleyT: 0, addCd: 8,
+      volleyLeft: 0, volleyT: 0, addCd: 8, mortarCd: 3.5,
     }
     this.enemies.push(e)
     this.spawnedIds.push(e.id)
@@ -393,6 +597,18 @@ export class Sim {
   }
 
   private bossPatterns(b: Enemy, dt: number): void {
+    // Mortar barrage — phase 2+: lead the target, arc over cover.
+    if (this.bossPhase >= 2) {
+      b.mortarCd -= dt
+      if (b.mortarCd <= 0) {
+        b.mortarCd = MORTAR_CD
+        const tgt = this.nearestAlivePlayer(b.x, b.z)
+        if (tgt) {
+          this.fireMortar(b, tgt)
+          if (this.bossPhase >= 3) this.fireMortar(b, tgt)
+        }
+      }
+    }
     // Shockwaves — every phase.
     b.patternCd -= dt
     if (b.patternCd <= 0) {
@@ -477,19 +693,62 @@ export class Sim {
         if (p.comboT <= 0 && p.combo > 0) p.combo = 0
       }
       movePlayerBody(p, inp, dt, MOVE_CTX, this.comboSpeed(p))
+      // Player ⇄ prop contact: separate the player, shove the prop (crates
+      // are light and slide; barrels are heavy and barely budge).
+      for (const q of this.props) {
+        if (!q.alive) continue
+        const dx = p.x - q.x
+        const dz = p.z - q.z
+        const min = q.r + PLAYER_RADIUS
+        const d2 = dx * dx + dz * dz
+        if (d2 >= min * min || d2 < 1e-6) continue
+        const d = Math.sqrt(d2)
+        const nx = dx / d
+        const nz = dz / d
+        if (p.y < 3) {
+          p.x = q.x + nx * min
+          p.z = q.z + nz * min
+        }
+        wakeProp(q)
+        const push = PLAYER_PUSH_FORCE / PROP_MASS[q.kind]
+        q.vx -= nx * push * dt * 8
+        q.vz -= nz * push * dt * 8
+        q.vx -= p.vx * 0.55 * dt * 6 / PROP_MASS[q.kind]
+        q.vz -= p.vz * 0.55 * dt * 6 / PROP_MASS[q.kind]
+      }
     }
 
     const sm = this.threat()
 
-    // 2. Enemies: separation, seek, attacks.
+    // 2. Enemies: physics state (knockback, airborne, stagger), then seek & attack.
     for (const e of this.enemies) {
       const def = KINDS[e.kind]
+      // Knockback decays; stagger blocks seeking & firing.
+      const kDecay = Math.max(0, 1 - 6 * dt)
+      e.kx *= kDecay
+      e.kz *= kDecay
+      e.stag = Math.max(0, e.stag - dt)
+      if (e.kx !== 0 || e.kz !== 0) {
+        e.x = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.x + e.kx * dt))
+        e.z = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.z + e.kz * dt))
+        pushOutOfObstacles(e, def.radius * 0.6, OBSTACLES)
+      }
+      // Airborne (launched): ballistic arc with a landing bounce.
+      if (e.y > 0 || e.vy > 0) {
+        e.vy -= GRAVITY * dt
+        e.y += e.vy * dt
+        if (e.y <= 0) {
+          e.y = 0
+          e.vy = e.vy < -12 ? -e.vy * 0.3 : 0
+        }
+      }
       const tgt = this.nearestAlivePlayer(e.x, e.z)
       if (!tgt) continue
       const dx = tgt.x - e.x
       const dz = tgt.z - e.z
       const dist = Math.hypot(dx, dz) || 1
-      const go = !(def.boss && dist < 24)
+      const grounded = e.y <= 0.01
+      const go = !(def.boss && dist < 24) && grounded && e.stag <= 0
       if (go) {
         const sp = def.speed * sm
         e.x += (dx / dist) * sp * dt
@@ -498,8 +757,25 @@ export class Sim {
         e.x = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.x))
         e.z = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.z))
       }
-      // Elite aimed shots.
-      if (def.shoot) {
+      // Enemies path around (and shove) dynamic props.
+      for (const q of this.props) {
+        if (!q.alive) continue
+        const ex = e.x - q.x
+        const ez = e.z - q.z
+        const min = q.r + def.radius * 0.6
+        const d2 = ex * ex + ez * ez
+        if (d2 >= min * min || d2 < 1e-6 || !grounded) continue
+        const d = Math.sqrt(d2)
+        const nx = ex / d
+        const nz = ez / d
+        e.x = q.x + nx * min
+        e.z = q.z + nz * min
+        wakeProp(q)
+        q.vx -= nx * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
+        q.vz -= nz * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
+      }
+      // Elite aimed shots (never while staggered or airborne).
+      if (def.shoot && e.stag <= 0 && grounded) {
         e.shootCd -= dt
         if (dist < 62 && e.shootCd <= 0) {
           e.shootCd = 3 + this.rng.next() * 2.2
@@ -508,8 +784,8 @@ export class Sim {
         }
       }
       if (def.boss) this.bossPatterns(e, dt)
-      // Contact damage.
-      if (dist < PLAYER_RADIUS + def.radius && tgt.inv <= 0) {
+      // Contact damage (only while grounded).
+      if (dist < PLAYER_RADIUS + def.radius && tgt.inv <= 0 && grounded) {
         this.hurtPlayer(tgt)
         if (!def.boss) {
           const i = this.enemies.indexOf(e)
@@ -539,13 +815,26 @@ export class Sim {
       }
     }
 
-    // 3. Bullets.
+    // 3. Bullets — vs players, walls AND dynamic props (cover + ordnance).
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i]!
       b.x += b.dx * b.speed * dt
       b.z += b.dz * b.speed * dt
       b.life -= dt
       let dead = b.life <= 0 || Math.abs(b.x) > ARENA || Math.abs(b.z) > ARENA || circleHitsObstacle(b.x, b.z, 0.4, OBSTACLES)
+      if (!dead) {
+        for (const q of this.props) {
+          if (!q.alive) continue
+          if (Math.hypot(b.x - q.x, b.z - q.z) < q.r + 0.5) {
+            dead = true
+            if (q.expl && q.fuse <= 0) {
+              q.hp--
+              if (q.hp <= 0) q.fuse = 0.1 // stray fire cooks off the ordnance
+            }
+            break
+          }
+        }
+      }
       if (!dead) {
         for (const p of this.players) {
           if (!p.alive || p.inv > 0) continue
@@ -558,6 +847,22 @@ export class Sim {
       }
       if (dead) this.bullets.splice(i, 1)
     }
+
+    // 3b. Mortar shells: parabolic integration, impact = blast.
+    for (let i = this.mortars.length - 1; i >= 0; i--) {
+      const m = this.mortars[i]!
+      m.vy -= GRAVITY * dt
+      m.x += m.vx * dt
+      m.z += m.vz * dt
+      m.y += m.vy * dt
+      if (m.y <= 0 || circleHitsObstacle(m.x, m.z, 0.5, OBSTACLES)) {
+        this.mortars.splice(i, 1)
+        this.applyBlast(m.x, m.z, MORTAR_RADIUS, MORTAR_KILL_RADIUS, MORTAR_POWER, MORTAR_LAUNCH, null)
+      }
+    }
+
+    // 3c. Dynamic props: integrate; expired fuses detonate (deferred chains).
+    for (const id of stepProps(this.props, dt, OBSTACLES, ARENA)) this.detonate(id)
 
     // 4. Shockwaves (jump to dodge: they only hit below y 1.6).
     for (let i = this.shocks.length - 1; i >= 0; i--) {
@@ -623,12 +928,18 @@ export class Sim {
     const kindIdx = (k: EnemyKind) => (k === 'RUNNER' ? 0 : k === 'GRUNT' ? 1 : k === 'ELITE' ? 2 : 3)
     const es = this.enemies.map(e => [
       e.id, kindIdx(e.kind), Math.round(e.x * 100) / 100, Math.round(e.z * 100) / 100,
-      e.ti, e.hp, e.maxhp, 1,
+      e.ti, e.hp, e.maxhp, Math.round(e.y * 10) / 10,
     ] as Snapshot['es'][number])
+    const pr = this.props.filter(p => p.alive).map(p => [
+      p.id,
+      p.kind === 'CRATE' ? 0 : p.expl ? 2 : 1,
+      Math.round(p.x * 10) / 10, Math.round(p.z * 10) / 10,
+      Math.round(p.y * 10) / 10, Math.round(p.rot * 100) / 100,
+    ] as NonNullable<Snapshot['pr']>[number])
     return {
       v: 1, t: this.time, tm: Math.round(this.runClock * 100) / 100,
       w: this.wave, k: this.kills, ov: this.over,
-      ps, es,
+      ps, es, pr,
       bs: this.bullets.map(b => [
         Math.round(b.x * 100) / 100, Math.round(b.z * 100) / 100,
         Math.round(b.dx * 1000) / 1000, Math.round(b.dz * 1000) / 1000,
@@ -652,6 +963,8 @@ export class Sim {
     for (const p of this.players) { mix(p.x * 64); mix(p.z * 64); mix(p.score); mix(p.lives) }
     for (const e of this.enemies) { mix(e.id); mix(e.x * 64); mix(e.z * 64); mix(e.ti) }
     for (const b of this.bullets) { mix(b.x * 64); mix(b.z * 64) }
+    for (const q of this.props) { if (q.alive) { mix(q.id); mix(q.x * 64); mix(q.z * 64); mix(q.rot * 64) } }
+    for (const m of this.mortars) { mix(m.x * 64); mix(m.z * 64) }
     return (h >>> 0).toString(16)
   }
 

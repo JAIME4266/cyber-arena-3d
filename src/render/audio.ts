@@ -8,6 +8,7 @@
 export type SfxName =
   | 'hit' | 'miss' | 'step' | 'damage' | 'boom' | 'dash' | 'pickup'
   | 'ui' | 'wave' | 'boss' | 'shoot' | 'shock' | 'win' | 'lose'
+  | 'blast' | 'mortar' | 'thud'
 
 export interface AudioSettings {
   musicVolume: number
@@ -104,6 +105,9 @@ export class AudioEngine {
       case 'boss': this.tone(55, 1.2, 0.16, 'sawtooth', 0.5); this.noise(0.8, 0.14, 300); break
       case 'shoot': this.tone(220, 0.08, 0.05, 'sawtooth', 0.5); break
       case 'shock': this.tone(90, 0.5, 0.12, 'sawtooth', 0.3); this.noise(0.5, 0.1, 400); break
+      case 'blast': this.noise(0.7, 0.3, 320); this.tone(46, 0.55, 0.2, 'sine', 0.5); this.noise(0.22, 0.18, 1500, 0.02); this.noise(0.5, 0.12, 900, 0.06); break
+      case 'mortar': this.tone(1350, 0.85, 0.06, 'sine', 0.24); break
+      case 'thud': this.noise(0.13, 0.16, 240); this.tone(62, 0.14, 0.11, 'sine', 0.5); break
       case 'win': [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.35, 0.09, 'sine', 1, i * 0.1)); break
       case 'lose': [400, 300, 200, 100].forEach((f, i) => this.tone(f, 0.3, 0.1, 'sawtooth', 0.8, i * 0.12)); break
     }

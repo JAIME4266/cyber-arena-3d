@@ -40,8 +40,14 @@ export class VFX {
 
   private readonly beam: THREE.Mesh
   private readonly camBase = new THREE.Vector3(0, 27, 41)
-  private shake = 0
+  /** Camera trauma (game-feel): shake = trauma², decays in REAL time so it
+   * survives hit-stop; offset is summed sines, never per-frame random. */
+  private trauma = 0
+  private traumaT = 0
   private kick = 0
+  /** Landing-dip spring (physics on the camera base, not the body). */
+  private dip = 0
+  private dipV = 0
   private speedlineV = 0
   private beamT = 0
 
@@ -138,7 +144,24 @@ export class VFX {
   }
 
   addShake(amount: number): void {
-    this.shake = Math.min(1.2, this.shake + amount)
+    this.trauma = Math.min(1, this.trauma + amount)
+  }
+
+  /** Trauma from a blast: attenuated by distance to the focus player. */
+  blast(x: number, z: number, _r: number, focus: { x: number; z: number }): void {
+    const d = Math.hypot(focus.x - x, focus.z - z)
+    const falloff = Math.max(0, 1 - d / 70)
+    this.addTrauma(0.45 + 0.5 * falloff)
+    this.addKick(0.8 + falloff * 0.2)
+  }
+
+  /** Hard landing: a quick camera dip through a damped spring. */
+  thud(): void {
+    this.dipV -= 15
+  }
+
+  addTrauma(amount: number): void {
+    this.trauma = Math.min(1, this.trauma + amount)
   }
 
   addKick(amount: number): void {
@@ -147,7 +170,7 @@ export class VFX {
 
   hitStop = 0
 
-  update(dt: number, vm: ViewModel, focus: { x: number; z: number; y: number }): void {
+  update(dt: number, vm: ViewModel, focus: { x: number; z: number; y: number }, realDt = dt): void {
     // Sparks
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i]!
@@ -179,33 +202,48 @@ export class VFX {
     this.beamT = Math.max(0, this.beamT - dt)
     if (this.beamT <= 0) this.beam.visible = false
 
-    // Camera: follow focus, combo pull-back, FOV kick, shake.
+    // Camera: follow focus (frame-rate independent easing), combo pull-back,
+    // FOV kick, trauma shake. Trauma decays with REAL dt (not the hit-stop
+    // scaled one) so the camera never freezes off-center.
     const combo = Math.min(vm.players[0]?.combo ?? 0, 20)
-    const k = Math.min(1, dt * 5)
+    const k = 1 - Math.exp(-5 * dt)
     this.camBase.x += (focus.x - this.camBase.x) * k
     this.camBase.y += (27 - combo * 0.12 - this.camBase.y) * k
     this.camBase.z += (focus.z + 41 - combo * 0.3 - this.camBase.z) * k
-    this.shake = Math.max(0, this.shake - dt * 1.8)
-    const shakeAmt = this.shakeEnabled() ? this.shake : 0
+    // Landing-dip spring: critically damped, snaps back to rest.
+    this.dipV += (-this.dip * 90 - this.dipV * 12) * realDt
+    this.dip += this.dipV * realDt
+    if (Math.abs(this.dip) < 0.002 && Math.abs(this.dipV) < 0.02) {
+      this.dip = 0
+      this.dipV = 0
+    }
+    this.trauma = Math.max(0, this.trauma - 1.4 * realDt)
+    const shakeAmt = this.shakeEnabled() ? this.trauma * this.trauma : 0
+    this.traumaT += realDt * 30
+    // Summed sines at unrelated rates: smooth, never a random buzz.
+    const ox = 2.4 * shakeAmt * Math.sin(this.traumaT * 1.7)
+    const oy = 1.6 * shakeAmt * Math.sin(this.traumaT * 2.3)
     this.camera.position.set(
-      this.camBase.x + (Math.random() - 0.5) * shakeAmt * 2.4,
-      this.camBase.y + (Math.random() - 0.5) * shakeAmt * 1.6,
+      this.camBase.x + ox,
+      this.camBase.y - this.dip + oy,
       this.camBase.z,
     )
-    this.camera.fov += (55 + combo * 0.75 + shakeAmt * 5 - this.camera.fov) * Math.min(1, dt * 6)
+    this.camera.fov += (55 + combo * 0.75 + shakeAmt * 5 - this.camera.fov) * k
     this.camera.updateProjectionMatrix()
-    this.camera.lookAt(focus.x, 4 + focus.y * 0.4, focus.z)
-    if (shakeAmt > 0) this.camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.05
+    this.camera.lookAt(focus.x, 4 + focus.y * 0.4 - this.dip * 0.4, focus.z)
+    this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1)
 
     // Speed lines
-    this.kick = Math.max(0, this.kick - dt * 5)
-    this.speedlineV += (Math.min(Math.max((combo - 3) / 12, 0), 1) * 0.7 + this.kick * 0.45 - this.speedlineV) * Math.min(1, dt * 8)
+    this.kick = Math.max(0, this.kick - realDt * 5)
+    this.speedlineV += (Math.min(Math.max((combo - 3) / 12, 0), 1) * 0.7 + this.kick * 0.45 - this.speedlineV) * Math.min(1, realDt * 8)
     this.speedlinesEl.style.opacity = this.speedlineV.toFixed(2)
   }
 
   resetCamera(): void {
     this.camBase.set(0, 27, 41)
-    this.shake = 0
+    this.trauma = 0
     this.kick = 0
+    this.dip = 0
+    this.dipV = 0
   }
 }

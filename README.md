@@ -134,6 +134,75 @@ a **procedural animation layer** instead of clips:
 The pack streams in the background (progress shown on the menu); runs started
 mid-download show a brief loading gate. HD MODELS can be toggled in SETTINGS.
 
+## Combat physics 2.0
+
+Version 2.2.0 adds a deterministic combat physics layer to the range. It
+lives in `src/core/physics.ts`: bespoke 2.5D impulse dynamics — circles,
+AABBs, impulses and parabolic ballistics — rather than a general-purpose
+rigid body engine. It runs inside the existing deterministic fixed 60 Hz
+timestep with the seeded RNG: zero `Math.random`, no DOM or three.js
+imports, so the golden determinism tests and the authoritative co-op host
+keep working unchanged. The collision layer matrix is documented in the
+`physics.ts` header; every tuning knob lives in the `COMBAT PHYSICS 2.0`
+block of `src/core/constants.ts`.
+
+### Momentum movement
+
+Characters carry persistent velocity with acceleration/deceleration curves —
+full control on the ground, reduced control in the air. Knockback velocity
+decays exponentially, and hard landings rebound off the floor.
+
+### Dynamic ordnance and cover
+
+The range stocks 6 explosive barrels, 3 inert water drums and 6 supply
+crates, placed as three deterministic "stockpile clusters" plus scattered
+singles. Props are full dynamics bodies: mass table (player 1.0, crate 0.55,
+barrel 1.6), per-kind friction and restitution, sleeping bodies, a
+tunnelling speed cap (38 u/s at 60 Hz — below the thinnest body radius per
+step), mass-weighted prop-vs-prop impulse exchange, and wall reflection.
+Bullets collide with props too: crates are cover, and stray fire cooks off
+explosive barrels.
+
+### Chain reactions
+
+Killing an enemy within 8 units of an explosive barrel damages it. Blasts set
+fuses on every barrel inside the radius with a randomized 0.12–0.26 s chain
+delay; detonation is deferred to the next integration pass, so chains never
+recurse. Explosions kill and launch enemies (ragdoll launches), hurt and
+launch players, and shove props.
+
+### Enemy combat physics
+
+Typed letters stagger and knock targets back. Blasts launch enemies airborne
+on a ballistic arc with a landing bounce; staggered or airborne enemies
+cannot seek or fire.
+
+### Boss mortar barrage
+
+From phase 2 onward the JUGGERNAUT fires a mortar barrage: ballistic shells
+with target lead, integrated parabolically, detonating a blast on ground or
+roof impact. Shells arc over cover — hiding behind a crate is not the same
+as being safe.
+
+### Camera physics (game feel)
+
+Screen shake is trauma-based: displacement scales with trauma², driven by
+summed sines, decaying in real time so it survives hit-stop. A landing-thud
+dip spring, distance-attenuated blast trauma and camera roll complete the
+handheld feel.
+
+### Ragdoll deaths
+
+Kill events carry a deterministic impulse direction, spin and lift. The view
+layer renders the ballistic tumble with ground bounces.
+
+### Co-op
+
+Props serialize in the 10 Hz snapshot as an additive, optional `pr` array —
+the protocol stays v1. Enemy airborne height rides the repurposed snapshot
+slot 7. Guests predict blasts locally for a zero-latency launch feel and
+reconcile against the authoritative result.
+
 ## Development
 
 ```bash
@@ -182,3 +251,10 @@ build, kept for reference.
 - Elite rebuild (2026) and the RANGE HOT real-world redesign: deterministic
   engine, HD asset pipeline + procedural Mixamo animation, P2P co-op, CI/CD,
   tests
+- Engineering disciplines applied from the open-source
+  **awesome-gamedev-agent-skills** collection
+  (github.com/gamedev-skills/awesome-gamedev-agent-skills): the
+  physics-tuning, game-feel and camera-systems skills guided the
+  fixed-step/CCD/mass-ratio tuning, the trauma-based shake, and the
+  frame-rate-independent camera smoothing. No code was copied; concepts were
+  applied.

@@ -18,6 +18,7 @@ import { createActor, createPlayerActor } from '../render/actorfactory'
 import type { ActorView } from '../render/actor'
 import { LabelSystem } from '../render/labels'
 import { VFX } from '../render/vfx'
+import { PropRenderer } from '../render/props'
 import { Hud } from '../render/hud'
 import type { AudioEngine } from '../render/audio'
 import { OverlayScreens } from '../ui/overlay'
@@ -25,6 +26,7 @@ import type { Settings } from '../ui/menu'
 import type { NetHost } from '../net/host'
 import type { NetClient } from '../net/client'
 import type { Transport } from '../net/transport'
+import { BLAST_LAUNCH, BLAST_POWER, BLAST_RADIUS } from '../core/constants'
 
 export type SessionMode = 'solo' | 'daily' | 'coop-host' | 'coop-guest'
 
@@ -44,6 +46,11 @@ interface EnemyView {
   holder: THREE.Group
   actor: ActorView
   kind: EnemyKind
+  /** Ragdoll state after the kill event: ballistic tumble + ground bounces. */
+  rag?: { dx: number; dz: number; spin: number; vy: number; y: number }
+  /** Previous frame position — velocity estimate drives flinches. */
+  lastX?: number
+  lastZ?: number
 }
 
 const BULLET_GEO = new THREE.BoxGeometry(0.5, 0.5, 2.6)
@@ -69,6 +76,10 @@ export class Session {
   private readonly shockPool: THREE.Mesh[] = []
   private readonly pickupPool: THREE.Group[] = []
   private readonly bubbleMeshes: THREE.Group[] = []
+  private readonly propFx: PropRenderer
+  /** Local player fall tracking for landing thuds. */
+  private prevLocalY = 0
+  private prevLocalVy = 0
 
   private raf = 0
   private lastFrame = 0
@@ -111,6 +122,8 @@ export class Session {
     })
     this.screens = new OverlayScreens(cfg.fxLayer.parentElement ?? document.body)
     this.hud = new Hud(cfg.fxLayer.parentElement ?? document.body, { onPause: () => this.togglePause() })
+    this.propFx = new PropRenderer(cfg.renderer.scene, (x, y, z, color, n, power) =>
+      this.vfx.sparkBurst(x, y, z, color, n, power))
 
     // Player actors.
     const playerCount = this.host || this.client ? 2 : 1
@@ -254,6 +267,7 @@ export class Session {
     this.raf = requestAnimationFrame(this.frame)
     const raw = Math.min(50, now - this.lastFrame)
     this.lastFrame = now
+    const realDt = Math.min(0.05, raw / 1000)
     let dt = Math.min(0.033, raw / 1000)
 
     // Quality governor: drop bloom if frames are consistently slow.
@@ -310,6 +324,8 @@ export class Session {
     )
     const combo = vm.players[0]?.combo ?? 0
     this.cfg.audio.setIntensity(Math.min(1, 0.2 + combo / 14))
+    this.propFx.update(dt)
+    this.vfx.update(dt, vm, vm.players[0] ?? { x: 0, z: 0, y: 0 }, realDt)
     this.renderer().render()
   }
 
@@ -359,8 +375,12 @@ export class Session {
     }))
     if (this.localId === 1 && players.length > 1) players.reverse()
     const enemies = sim.enemies.map(e => ({
-      id: e.id, kind: e.kind, x: e.x, z: e.z, ti: e.ti, seq: e.seq,
+      id: e.id, kind: e.kind, x: e.x, z: e.z, y: e.y, ti: e.ti, seq: e.seq,
       hp: e.hp, maxhp: e.maxhp,
+    }))
+    const props = sim.props.filter(p => p.alive).map(p => ({
+      id: p.id, kind: p.kind, expl: p.expl,
+      x: p.x, z: p.z, y: p.y, rot: p.rot,
     }))
     return {
       time: sim.runClock,
@@ -373,6 +393,7 @@ export class Session {
       shocks: sim.shocks.map(s => ({ x: s.x, z: s.z, r: s.r })),
       pickups: sim.pickups.map(p => ({ x: p.x, z: p.z })),
       bubbles: sim.bubbles,
+      props,
       bossHp: sim.boss ? sim.boss.hp : 0,
       bossMax: sim.boss ? sim.boss.maxhp : 0,
       lockId: sim.players[this.localId]?.lockId ?? -1,
@@ -391,7 +412,7 @@ export class Session {
         this.vfx.sparkBurst(e.x, 3, e.z, 0xffffff, 12, 1.3)
         this.vfx.ring(e.x, e.z, color)
         this.world.boom(e.x, e.z, color)
-        this.vfx.addShake(0.3)
+        this.vfx.addTrauma(0.3)
         this.vfx.hitStop = 0.035
         this.vfx.addKick(1)
         this.cfg.audio.sfx('boom')
@@ -401,20 +422,52 @@ export class Session {
         } else if (e.by === local) {
           this.vfx.text(KILL_MSGS[(Math.random() * KILL_MSGS.length) | 0], e.x, 5, e.z)
         }
-        // Move actor to dying list.
+        // Move actor to dying list with its ragdoll launch parameters.
         const view = this.enemies.get(e.id)
         if (view) {
           this.enemies.delete(e.id)
           this.labels.remove(e.id)
           view.actor.die()
+          view.rag = {
+            dx: e.dx ?? 0,
+            dz: e.dz ?? 1,
+            spin: e.spin ?? 5,
+            vy: e.vy ?? 11,
+            y: view.holder.position.y,
+          }
           this.dying.push({ view, t: 0 })
         }
+        break
+      }
+      case 'blast': {
+        // Large tier (game-feel): heavy trauma, short hit-stop, fireball.
+        const focus = vm?.players[0] ?? { x: 0, z: 0 }
+        this.cfg.audio.sfx('blast')
+        this.vfx.blast(e.x, e.z, e.r, focus)
+        this.vfx.hitStop = Math.min(0.12, this.vfx.hitStop > 0 ? this.vfx.hitStop : 0.05)
+        this.world.boom(e.x, e.z, 0xd97e2c, 26)
+        this.world.boom(e.x + 2, e.z - 1, 0x552211, 14)
+        this.vfx.sparkBurst(e.x, 2.5, e.z, 0xe8742c, 34, 2.1)
+        this.vfx.sparkBurst(e.x, 2, e.z, 0xfff0d0, 12, 2.6)
+        this.vfx.sparkBurst(e.x, 1.5, e.z, 0x3a362e, 18, 0.5)
+        this.vfx.ring(e.x, e.z, 0xb9a67e)
+        this.vfx.ring(e.x, e.z, 0xd97e2c)
+        this.propFx.reapShells(e.x, e.z)
+        // Guest: predict the launch locally so it is felt this frame.
+        if (this.client) {
+          this.client.applyBlast(e.x, e.z, BLAST_RADIUS, BLAST_POWER, BLAST_LAUNCH)
+        }
+        break
+      }
+      case 'mortar': {
+        this.cfg.audio.sfx('mortar')
+        this.propFx.spawnShell(e.x, e.z, e.vx, e.vz, e.vy)
         break
       }
       case 'hurt': {
         if (e.p === local) {
           this.screens.damageFlash()
-          this.vfx.addShake(0.6)
+          this.vfx.addTrauma(0.6)
           this.cfg.audio.sfx('damage')
           this.playerActors[local]?.hit()
         }
@@ -446,7 +499,7 @@ export class Session {
       case 'bossphase': {
         this.cfg.audio.sfx('boss')
         this.vfx.text(`JUGGERNAUT PHASE ${e.phase}`, 0, 14, -20)
-        this.vfx.addShake(0.5)
+        this.vfx.addTrauma(0.5)
         break
       }
       case 'pickup': {
@@ -460,7 +513,7 @@ export class Session {
       }
       case 'shock': {
         this.cfg.audio.sfx('shock')
-        this.vfx.addShake(0.4)
+        this.vfx.addTrauma(0.4)
         const p = vm?.players[0]
         if (p) this.vfx.text('JUMP!', p.x, 9, p.z)
         break
@@ -533,6 +586,20 @@ export class Session {
         air: p.y > 0.4,
       })
     })
+    // Landing thud: local player touched down from a real fall.
+    {
+      const p = vm.players[0]
+      if (p) {
+        const vy = (p.y - this.prevLocalY) / Math.max(dt, 1e-4)
+        if (this.prevLocalY > 0.6 && p.y <= 0.05 && this.prevLocalVy < -18) {
+          this.vfx.thud()
+          this.vfx.addTrauma(0.22)
+          this.cfg.audio.sfx('thud')
+        }
+        this.prevLocalY = p.y
+        this.prevLocalVy = vy
+      }
+    }
     // Blink during invulnerability.
     const localHolder = this.playerHolders[this.localId]
     const localP = vm.players[0]
@@ -540,7 +607,7 @@ export class Session {
       localHolder.visible = localP.alive && (localP.inv <= 0 || Math.floor(localP.inv * 14) % 2 === 0)
     }
 
-    // Enemies: add/update/remove.
+    // Enemies: add/update/remove — height + flinch now physical.
     const seen = new Set<number>()
     for (const e of vm.enemies) {
       seen.add(e.id)
@@ -553,20 +620,25 @@ export class Session {
         view = { holder, actor, kind: e.kind }
         this.enemies.set(e.id, view)
       }
-      view.holder.position.set(e.x, 0, e.z)
+      view.holder.position.set(e.x, e.y, e.z)
       const nearest = vm.players.reduce((a, b) =>
         Math.hypot(a.x - e.x, a.z - e.z) < Math.hypot(b.x - e.x, b.z - e.z) ? a : b)
       view.holder.rotation.y = Math.atan2(nearest.x - e.x, nearest.z - e.z)
+      // Flinch when launched hard (knockback velocity estimate).
+      const vel = Math.hypot(e.x - (view.lastX ?? e.x), e.z - (view.lastZ ?? e.z)) / Math.max(dt, 1e-4)
+      if (e.y > 0.05 && vel > 24) view.actor.hit()
+      view.lastX = e.x
+      view.lastZ = e.z
       view.actor.update(dt, {
         moving: e.kind !== 'BOSS' || Math.hypot(nearest.x - e.x, nearest.z - e.z) > 24,
         aiming: KINDS[e.kind].gun,
         speed: 3 + KINDS[e.kind].speed * 0.9,
-        air: false,
+        air: e.y > 0.5,
       })
       this.labels.ensure(e.id, e.kind)
       this.labels.update(
         e.id, e.kind, e.seq, e.ti, this.lockFeedbackId === e.id,
-        e.x, this.labels.labelY(e.kind), e.z, this.renderer().camera.quaternion,
+        e.x, this.labels.labelY(e.kind) + e.y, e.z, this.renderer().camera.quaternion,
       )
     }
     for (const [id, view] of this.enemies) {
@@ -578,11 +650,33 @@ export class Session {
       }
     }
 
-    // Dying actors: death anim + shrink, then remove.
+    // Dying actors: physical ragdoll — ballistic tumble with ground bounces.
     for (let i = this.dying.length - 1; i >= 0; i--) {
       const d = this.dying[i]!
       d.t += dt
-      d.view.actor.update(dt, { moving: false, aiming: false, speed: 0, air: false })
+      const rag = d.view.rag
+      if (rag) {
+        rag.vy -= 70 * dt
+        rag.y += rag.vy * dt
+        if (rag.y <= 0 && rag.vy < 0) {
+          if (rag.vy < -13) {
+            rag.y = 0
+            rag.vy = -rag.vy * 0.35
+            rag.dx *= 0.6
+            rag.dz *= 0.6
+            this.vfx.sparkBurst(d.view.holder.position.x, 0.5, d.view.holder.position.z, 0x8a8272, 4, 0.3)
+          } else {
+            rag.y = 0
+            rag.vy = 0
+          }
+        }
+        d.view.holder.position.y = rag.y
+        d.view.holder.position.x += rag.dx * 8 * dt
+        d.view.holder.position.z += rag.dz * 8 * dt
+        d.view.holder.rotation.x += rag.spin * dt
+        d.view.holder.rotation.z += rag.spin * 0.4 * dt
+      }
+      d.view.actor.update(dt, { moving: false, aiming: false, speed: 0, air: (d.view.rag?.y ?? 0) > 0.5 })
       d.view.holder.scale.setScalar(Math.max(0.01, (1.7 - d.t) / 0.35 > 1 ? 1 : (1.7 - d.t) / 0.35))
       if (d.t > 1.7) {
         d.view.holder.removeFromParent()
@@ -598,12 +692,13 @@ export class Session {
     this.syncPickups(vm, dt)
     // Bubbles.
     this.syncBubbles(vm, dt)
+    // Dynamic combat-physics props (barrels, crates).
+    this.propFx.sync(vm.props, dt)
 
     // Focus + world + vfx.
     const focus = vm.players[0] ?? { x: 0, z: 0, y: 0 }
     this.world.update(dt, focus.x, focus.z, this.renderer().camera.position)
     this.world.decayBoom(dt)
-    this.vfx.update(dt, vm, focus)
   }
 
   private syncBullets(vm: ViewModel): void {
@@ -767,6 +862,9 @@ export class Session {
     // Reset player actors.
     for (const a of this.playerActors) a.reset()
     this.vfx.resetCamera()
+    this.propFx.clear()
+    this.prevLocalY = 0
+    this.prevLocalVy = 0
     this.cfg.audio.setIntensity(0.2)
   }
 
@@ -782,6 +880,7 @@ export class Session {
     this.hud.show(false)
     this.screens.hideGameOver()
     this.screens.hidePause()
+    this.propFx.clear()
     this.world.dispose()
     this.cfg.renderer.scene.clear()
   }

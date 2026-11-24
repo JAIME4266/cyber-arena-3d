@@ -9,6 +9,7 @@
 | Version | Change |
 | --- | --- |
 | 2.1.0 | Full de-slop: cyberpunk → real-world live-fire training range ("RANGE HOT"). |
+| 2.2.0 | Combat physics 2.0: dynamic ordnance (explosive barrels, crates), chain reactions, mortar ballistics, ragdoll deaths, momentum movement — same deterministic 60 Hz core. |
 
 ## 1. Discovery
 
@@ -144,3 +145,12 @@ domes are yellow-green haze; med kits are white boxes with red crosses.
 - [x] Color never the only signal; focus visible; targets ≥ 24px
 - [x] Terminology is domain-authentic (real range language), not theme-park
 - [x] Density fits an action game HUD: tight, ordered, readable at a glance
+
+## 10. Combat physics direction
+
+Combat physics must read as real-world ordnance handling, never as sci-fi
+magic. Barrels are painted rust with FLAMMABLE stencils; crates are stenciled
+5.56 BALL; no energy fields anywhere. Explosions are dust, smoke and debris —
+a warm orange fireball, a brown dust ring, dark smoke — not neon. The camera
+is a handheld observer: trauma shake on impacts, a dip on hard landings. It
+is never a drone — no smooth glide, no artificial stabilization.
