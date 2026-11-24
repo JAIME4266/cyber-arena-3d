@@ -114,6 +114,11 @@ jobs:
         with:
           path: dist
 
+      # The artifact API needs a beat before deploy-pages can read its
+      # metadata — querying within ~1s of upload returns a stale "not found".
+      - name: Let artifact metadata propagate
+        run: sleep 20
+
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
