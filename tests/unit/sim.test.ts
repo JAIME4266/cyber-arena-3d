@@ -18,6 +18,16 @@ describe('waves', () => {
     drive(sim, 5)
     expect(sim.enemies.length).toBeGreaterThan(0)
     expect(sim.enemies.length).toBeLessThanOrEqual(14)
+    expect(sim.enemies.every(e => e.seq === e.seq.toUpperCase())).toBe(true)
+    expect(sim.enemies.every(e => e.seq.length >= 3)).toBe(true)
+  })
+
+  it('accepts uppercase keyboard input for generated training words', () => {
+    const sim = new Sim({ seed: 'typing-input', playerCount: 1 })
+    drive(sim, 5)
+    const target = firstEnemy(sim)
+    expect(target.seq.length).toBeGreaterThan(1)
+    expect(sim.typeKey(0, target.seq[0]!)).toBe('advance')
   })
 
   it('transitions to wave 2 at 50 kills; wave-2 enemies use unlocked 4-5 letter words', () => {
@@ -33,7 +43,10 @@ describe('waves', () => {
     }
     drive(sim, 5)
     expect(sim.enemies.length).toBeGreaterThan(0)
-    for (const e of sim.enemies) expect(e.seq.length).toBeGreaterThanOrEqual(4)
+    for (const e of sim.enemies) {
+      expect(e.seq.length).toBeGreaterThanOrEqual(4)
+      expect(e.seq.length).toBeLessThanOrEqual(5)
+    }
   })
 
   it('wave-2 mix is elite-heavy, wave-1 grunt-heavy (pickKind distribution)', () => {
@@ -57,6 +70,7 @@ describe('waves', () => {
     expect(sim.wave).toBe(3)
     expect(sim.boss).not.toBeNull()
     expect(sim.boss!.kind).toBe('BOSS')
+    expect(sim.boss!.seq.length).toBe(7)
     expect(sim.enemies.filter(e => e.kind !== 'BOSS').length).toBe(0)
     expect(sim.events.some(e => e.t === 'boss')).toBe(true)
   })

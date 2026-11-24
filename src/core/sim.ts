@@ -382,7 +382,7 @@ export class Sim {
       // Boss survives: new sequence, maybe a phase change.
       const oldPhase = this.bossPhase
       this.bossPhase = e.hp >= 7 ? 1 : e.hp >= 4 ? 2 : 3
-      e.seq = this.mkSeq(e.hp >= 7 ? 2 : e.hp >= 4 ? 3 : 4, 'BOSS')
+      e.seq = this.mkSeq('BOSS')
       e.ti = 0
       this.events.push({ t: 'boss', hp: e.hp, max: e.maxhp })
       this.events.push({ t: 'seq', id: e.id, seq: e.seq, kind: e.kind })
@@ -523,9 +523,9 @@ export class Sim {
 
   /* ------------------------------------------------ waves & spawning ------------------------------------------------ */
 
-  private mkSeq(len: number, kind: EnemyKind): string {
+  private mkSeq(kind: EnemyKind): string {
     const word = selectTrainingWord(kind, this.kills, this.rng.int(1000))
-    return word.slice(0, len)
+    return word.toUpperCase()
   }
 
   private startWave(w: number): void {
@@ -561,11 +561,10 @@ export class Sim {
         tries++
       } while (tries < 10 && this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 34))
     }
-    const seqLen = kind === 'BOSS' ? 5 : this.wave >= 2 ? 2 : 1
     const e: Enemy = {
       id: this.nextEnemyId++,
       kind, x, z, y: 0, vy: 0, kx: 0, kz: 0, stag: 0,
-      seq: this.mkSeq(seqLen, kind),
+      seq: this.mkSeq(kind),
       ti: 0,
       hp: kind === 'BOSS' ? 10 : 1,
       maxhp: kind === 'BOSS' ? 10 : 1,

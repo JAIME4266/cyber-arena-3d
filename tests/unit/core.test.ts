@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { RNG, hashString, isValidCode, randomCode } from '../../src/core/rng'
 import { decode, encode, inputToMsg, msgToInput, type NetMsg } from '../../src/core/protocol'
 import { accuracy, dailySeed, formatClock, formatScore, rank, wpm } from '../../src/core/stats'
-import { adaptiveEnemySpeedScale, enemyWordLength, trainingStage } from '../../src/core/typing'
+import { adaptiveEnemySpeedScale, enemyWordLength, selectTrainingWord, trainingStage } from '../../src/core/typing'
 
 describe('rng', () => {
   it('same seed → identical sequence', () => {
@@ -129,6 +129,15 @@ describe('adaptive typing curriculum', () => {
     expect(enemyWordLength('RUNNER', 1)).toBe(3)
     expect(enemyWordLength('RUNNER', 2)).toBe(4)
     expect(enemyWordLength('RUNNER', 3)).toBe(5)
+  })
+
+  it('selects a word at the exact curriculum length for every enemy and stage', () => {
+    const kinds = ['RUNNER', 'GRUNT', 'ELITE', 'BOSS'] as const
+    for (const kills of [0, 50, 100]) {
+      for (const kind of kinds) {
+        expect(selectTrainingWord(kind, kills, 0).length).toBe(enemyWordLength(kind, trainingStage(kills)))
+      }
+    }
   })
 
   it('slows the arena for slow typists and reaches full pace at 100 WPM', () => {

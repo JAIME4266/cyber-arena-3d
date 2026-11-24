@@ -16,7 +16,7 @@ export const STAGE_TWO_WORDS: readonly string[] = [
 ]
 
 export const STAGE_THREE_WORDS: readonly string[] = [
-  'target', 'sprint', 'trigger', 'reload', 'impact', 'danger', 'operator',
+  'storm', 'squad', 'crack', 'target', 'sprint', 'trigger', 'reload', 'impact', 'danger', 'operator',
   'barrage', 'armored', 'training', 'defender', 'precision',
 ]
 
