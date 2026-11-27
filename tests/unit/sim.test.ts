@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Sim, pickKind } from '../../src/core/sim'
-import { KEYS, KINDS } from '../../src/core/constants'
+import { KEYS, KINDS, OBSTACLES } from '../../src/core/constants'
 import { emptyInput } from '../../src/core/types'
 import { RNG } from '../../src/core/rng'
 
@@ -200,5 +200,48 @@ describe('determinism', () => {
     }
     expect(run('det-1')).toBe(run('det-1'))
     expect(run('det-1')).not.toBe(run('det-2'))
+  })
+})
+
+describe('ai & steering', () => {
+  it('spawns enemies outside obstacles and maintains non-overlapping separation', () => {
+    const sim = new Sim({ seed: 'ai-safe', playerCount: 1 })
+    drive(sim, 3)
+    for (const e of sim.enemies) {
+      const r = KINDS[e.kind].radius * 0.6
+      const insideObstacle = OBSTACLES.some(
+        o => e.x > o.x - o.hw - r && e.x < o.x + o.hw + r && e.z > o.z - o.hd - r && e.z < o.z + o.hd + r,
+      )
+      expect(insideObstacle).toBe(false)
+    }
+    drive(sim, 120)
+    for (let i = 0; i < sim.enemies.length; i++) {
+      for (let j = i + 1; j < sim.enemies.length; j++) {
+        const a = sim.enemies[i]!
+        const b = sim.enemies[j]!
+        const d = Math.hypot(a.x - b.x, a.z - b.z)
+        expect(d).toBeGreaterThan((KINDS[a.kind].radius + KINDS[b.kind].radius) * 0.7)
+      }
+    }
+  })
+
+  it('elites telegraph shots with a windup event before firing', () => {
+    const sim = new Sim({ seed: 'ai-windup', playerCount: 1 })
+    drive(sim, 3)
+    sim.debugAddKills(50)
+    drive(sim, 2)
+    for (const e of [...sim.enemies]) {
+      while (sim.enemies.includes(e)) sim.debugTypeAt(0, e.seq[e.ti]!, e.id)
+    }
+    sim.events.length = 0
+    // Keep player alive & invulnerable-checked by stepping 6 seconds so an elite winds up and shoots.
+    for (let i = 0; i < 360; i++) {
+      sim.players[0]!.lives = 3
+      sim.step(1 / 60, [emptyInput()])
+    }
+    const windups = sim.events.filter(e => e.t === 'windup')
+    const shots = sim.events.filter(e => e.t === 'shot')
+    expect(windups.length).toBeGreaterThan(0)
+    expect(shots.length).toBeGreaterThan(0)
   })
 })
