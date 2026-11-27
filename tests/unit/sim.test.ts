@@ -244,4 +244,30 @@ describe('ai & steering', () => {
     expect(windups.length).toBeGreaterThan(0)
     expect(shots.length).toBeGreaterThan(0)
   })
+
+  it('maintains stable target lock without jumping mid-word and clears invalid locks', () => {
+    const sim = new Sim({ seed: 'lock-stable', playerCount: 1 })
+    drive(sim, 5)
+    expect(sim.enemies.length).toBeGreaterThanOrEqual(2)
+    const a = sim.enemies[0]!
+    const b = sim.enemies[1]!
+    // Lock onto enemy a with its first letter.
+    expect(sim.debugTypeAt(0, a.seq[0]!, a.id)).toBe('advance')
+    expect(sim.players[0]!.lockId).toBe(a.id)
+
+    // Pressing a different enemy's letter (that doesn't match a.seq[1]) must miss, NOT switch to b.
+    const wrongForA = KEYS.find(k => k !== a.seq[1] && k === b.seq[0]) ?? KEYS.find(k => k !== a.seq[1])!
+    expect(sim.typeKey(0, wrongForA)).toBe('miss')
+    expect(sim.players[0]!.lockId).toBe(-1)
+    expect(b.ti).toBe(0)
+
+    // Re-lock onto a, then remove a externally (invalid target) -> lock clears cleanly.
+    expect(sim.debugTypeAt(0, a.seq[0]!, a.id)).toBe('advance')
+    expect(sim.players[0]!.lockId).toBe(a.id)
+    sim.enemies.splice(sim.enemies.indexOf(a), 1)
+    expect(sim.bestTargetId(0)).not.toBe(a.id)
+    const next = sim.enemies[0]!
+    expect(sim.typeKey(0, next.seq[0]!)).toBe('advance')
+    expect(sim.players[0]!.lockId).toBe(next.id)
+  })
 })
