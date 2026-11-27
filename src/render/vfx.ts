@@ -19,6 +19,13 @@ interface Ring {
   life: number
 }
 
+interface Flash {
+  mesh: THREE.Mesh
+  life: number
+  maxLife: number
+  size: number
+}
+
 export interface VfxOptions {
   fxLayer: HTMLElement
   speedlinesEl: HTMLElement
@@ -36,10 +43,13 @@ export class VFX {
   private readonly sparkPool: THREE.Mesh[] = []
   private readonly rings: Ring[] = []
   private readonly ringPool: THREE.Mesh[] = []
+  private readonly flashes: Flash[] = []
+  private readonly flashPool: THREE.Mesh[] = []
   private readonly sparkMats = new Map<number, THREE.MeshBasicMaterial>()
 
   private readonly beam: THREE.Mesh
   private readonly camBase = new THREE.Vector3(0, 27, 41)
+  private readonly camLead = new THREE.Vector2(0, 0)
   /** Camera trauma (game-feel): shake = trauma², decays in REAL time so it
    * survives hit-stop; offset is summed sines, never per-frame random. */
   private trauma = 0
@@ -74,6 +84,16 @@ export class VFX {
       m.visible = false
       scene.add(m)
       this.ringPool.push(m)
+    }
+    const flashGeo = new THREE.SphereGeometry(1, 10, 8)
+    for (let i = 0; i < 20; i++) {
+      const m = new THREE.Mesh(
+        flashGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
+      )
+      m.visible = false
+      scene.add(m)
+      this.flashPool.push(m)
     }
 
     this.beam = new THREE.Mesh(
@@ -123,6 +143,19 @@ export class VFX {
     this.rings.push({ mesh, life: 0.5 })
   }
 
+  /** Crisp, localized impact flash that fades fast without obscuring labels. */
+  impactFlash(x: number, y: number, z: number, color: number, size = 1.4, life = 0.12): void {
+    const mesh = this.flashPool.pop()
+    if (!mesh) return
+    const mat = mesh.material as THREE.MeshBasicMaterial
+    mat.color.setHex(color)
+    mat.opacity = 0.85
+    mesh.position.set(x, y, z)
+    mesh.scale.setScalar(size)
+    mesh.visible = true
+    this.flashes.push({ mesh, life, maxLife: life, size })
+  }
+
   /** Show the tracer beam from a muzzle to a target for a few frames. */
   showBeam(from: THREE.Vector3, to: THREE.Vector3, width: number): void {
     this.beam.position.copy(from).lerp(to, 0.5)
@@ -170,7 +203,13 @@ export class VFX {
 
   hitStop = 0
 
-  update(dt: number, vm: ViewModel, focus: { x: number; z: number; y: number }, realDt = dt): void {
+  update(
+    dt: number,
+    vm: ViewModel,
+    focus: { x: number; z: number; y: number },
+    realDt = dt,
+    targetLook?: { x: number; z: number } | null,
+  ): void {
     // Sparks
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i]!
@@ -198,18 +237,46 @@ export class VFX {
         this.rings.splice(i, 1)
       }
     }
+    // Impact flashes
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const fl = this.flashes[i]!
+      fl.life -= realDt
+      const p = Math.max(0, fl.life / fl.maxLife)
+      fl.mesh.scale.setScalar(fl.size * (0.4 + p * 0.8))
+      ;(fl.mesh.material as THREE.MeshBasicMaterial).opacity = p * 0.85
+      if (fl.life <= 0) {
+        fl.mesh.visible = false
+        this.flashPool.push(fl.mesh)
+        this.flashes.splice(i, 1)
+      }
+    }
     // Beam
     this.beamT = Math.max(0, this.beamT - dt)
     if (this.beamT <= 0) this.beam.visible = false
 
-    // Camera: follow focus (frame-rate independent easing), combo pull-back,
-    // FOV kick, trauma shake. Trauma decays with REAL dt (not the hit-stop
-    // scaled one) so the camera never freezes off-center.
+    // Camera: follow focus + subtle target look-ahead (clamped so framing stays
+    // predictable), combo pull-back, FOV kick, trauma shake.
     const combo = Math.min(vm.players[0]?.combo ?? 0, 20)
-    const k = 1 - Math.exp(-5 * dt)
-    this.camBase.x += (focus.x - this.camBase.x) * k
+    const k = 1 - Math.exp(-5.5 * realDt)
+    let leadX = 0
+    let leadZ = 0
+    if (targetLook) {
+      const dx = (targetLook.x - focus.x) * 0.14
+      const dz = (targetLook.z - focus.z) * 0.14
+      const ld = Math.hypot(dx, dz)
+      if (ld > 0.01) {
+        const clamped = Math.min(4.2, ld)
+        leadX = (dx / ld) * clamped
+        leadZ = (dz / ld) * clamped
+      }
+    }
+    const leadK = 1 - Math.exp(-4.2 * realDt)
+    this.camLead.x += (leadX - this.camLead.x) * leadK
+    this.camLead.y += (leadZ - this.camLead.y) * leadK
+
+    this.camBase.x += (focus.x + this.camLead.x * 0.65 - this.camBase.x) * k
     this.camBase.y += (27 - combo * 0.12 - this.camBase.y) * k
-    this.camBase.z += (focus.z + 41 - combo * 0.3 - this.camBase.z) * k
+    this.camBase.z += (focus.z + this.camLead.y * 0.45 + 41 - combo * 0.3 - this.camBase.z) * k
     // Landing-dip spring: critically damped, snaps back to rest.
     this.dipV += (-this.dip * 90 - this.dipV * 12) * realDt
     this.dip += this.dipV * realDt
@@ -230,8 +297,13 @@ export class VFX {
     )
     this.camera.fov += (55 + combo * 0.75 + shakeAmt * 5 - this.camera.fov) * k
     this.camera.updateProjectionMatrix()
-    this.camera.lookAt(focus.x, 4 + focus.y * 0.4 - this.dip * 0.4, focus.z)
-    this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1)
+    this.camera.lookAt(
+      focus.x + this.camLead.x,
+      4 + focus.y * 0.4 - this.dip * 0.4,
+      focus.z + this.camLead.y,
+    )
+    // Gentle camera roll response on lateral look-ahead + trauma shake.
+    this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1) - this.camLead.x * 0.0028
 
     // Speed lines
     this.kick = Math.max(0, this.kick - realDt * 5)
@@ -241,6 +313,7 @@ export class VFX {
 
   resetCamera(): void {
     this.camBase.set(0, 27, 41)
+    this.camLead.set(0, 0)
     this.trauma = 0
     this.kick = 0
     this.dip = 0

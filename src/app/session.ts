@@ -96,6 +96,8 @@ export class Session {
   private dashQueued = false
   private lockFeedbackId = -1
   private fireFlashT = 0
+  private localAng = Math.PI / 2
+  private lockLookTarget: { x: number; z: number } | null = null
 
   private frameMsEma = 16
   private qualityChecked = false
@@ -249,11 +251,14 @@ export class Session {
     }
     this.lockFeedbackId = target.id
     this.fireFlashT = 0.4
-    this.cfg.audio.sfx('step')
+    this.cfg.audio.hitKey((vm.players[0]?.combo ?? 0) + 1)
     this.playerActors[this.localId]?.shoot()
+    this.enemies.get(target.id)?.actor.hit()
     const from = this.playerActors[this.localId]?.muzzle() ?? new THREE.Vector3()
-    this.vfx.showBeam(from, new THREE.Vector3(target.x, KINDS[target.kind].scale * 5, target.z), 0.12)
-    this.vfx.sparkBurst(target.x, 3, target.z, 0xffd9a0, 10, 1)
+    const hitY = KINDS[target.kind].scale * 4.5
+    this.vfx.showBeam(from, new THREE.Vector3(target.x, hitY, target.z), 0.1)
+    this.vfx.impactFlash(target.x, hitY, target.z, 0xffd9a0, 1.3, 0.11)
+    this.vfx.sparkBurst(target.x, hitY * 0.75, target.z, 0xffd9a0, 8, 0.9)
   }
 
   /* ------------------------------------------------ loop ------------------------------------------------ */
@@ -329,7 +334,7 @@ export class Session {
     const combo = vm.players[0]?.combo ?? 0
     this.cfg.audio.setIntensity(Math.min(1, 0.2 + combo / 14))
     this.propFx.update(dt)
-    this.vfx.update(dt, vm, vm.players[0] ?? { x: 0, z: 0, y: 0 }, realDt)
+    this.vfx.update(dt, vm, vm.players[0] ?? { x: 0, z: 0, y: 0 }, realDt, this.lockLookTarget)
     this.renderer().render()
   }
 
@@ -379,8 +384,9 @@ export class Session {
     }))
     if (this.localId === 1 && players.length > 1) players.reverse()
     const enemies = sim.enemies.map(e => ({
-      id: e.id, kind: e.kind, x: e.x, z: e.z, y: e.y, ti: e.ti, seq: e.seq,
-      hp: e.hp, maxhp: e.maxhp,
+      id: e.id, kind: e.kind, x: e.x, z: e.z, y: e.y,
+      ang: e.ang, vx: e.vx, vz: e.vz, stag: e.stag, windup: e.windup, recover: e.recover,
+      ti: e.ti, seq: e.seq, hp: e.hp, maxhp: e.maxhp,
     }))
     const props = sim.props.filter(p => p.alive).map(p => ({
       id: p.id, kind: p.kind, expl: p.expl,
@@ -412,9 +418,11 @@ export class Session {
     switch (e.t) {
       case 'kill': {
         const color = KINDS[e.kind].color
-        this.vfx.sparkBurst(e.x, 3, e.z, color, 30, 1.1)
-        this.vfx.sparkBurst(e.x, 3, e.z, 0xffffff, 12, 1.3)
+        this.vfx.sparkBurst(e.x, 3, e.z, color, 26, 1.1)
+        this.vfx.sparkBurst(e.x, 3, e.z, 0xffffff, 10, 1.25)
+        this.vfx.impactFlash(e.x, 3.2, e.z, color, 2.1, 0.16)
         this.vfx.ring(e.x, e.z, color)
+        if (e.combo >= 5) this.vfx.ring(e.x, e.z, 0xffd27a)
         this.world.boom(e.x, e.z, color)
         this.vfx.addTrauma(0.3)
         this.vfx.hitStop = 0.035
@@ -511,8 +519,15 @@ export class Session {
         this.vfx.text('+1 ARMOR', e.x, 5, e.z)
         break
       }
+      case 'windup': {
+        this.cfg.audio.sfx('windup')
+        this.vfx.impactFlash(e.x, 4.4, e.z, 0xff4422, 1.1, 0.25)
+        this.vfx.ring(e.x, e.z, 0xff4422)
+        break
+      }
       case 'shot': {
         this.cfg.audio.sfx('shoot')
+        if (e.id !== undefined) this.enemies.get(e.id)?.actor.shoot()
         break
       }
       case 'shock': {
@@ -575,17 +590,32 @@ export class Session {
   /* ------------------------------------------------ scene sync ------------------------------------------------ */
 
   private syncScene(vm: ViewModel, dt: number): void {
+    const activeLockId = vm.lockId >= 0 ? vm.lockId : this.lockFeedbackId
+    const lockedEnemy = activeLockId >= 0 ? vm.enemies.find(e => e.id === activeLockId) : undefined
+    this.lockLookTarget = lockedEnemy ? { x: lockedEnemy.x, z: lockedEnemy.z } : null
+
     // Players.
     vm.players.forEach((p, i) => {
       const holder = this.playerHolders[i]
       const actor = this.playerActors[i]
       if (!holder || !actor) return
       holder.position.set(p.x, p.y, p.z)
-      holder.rotation.y = p.ang
+      if (i === this.localId) {
+        const wantAng = lockedEnemy
+          ? Math.atan2(lockedEnemy.x - p.x, lockedEnemy.z - p.z)
+          : p.ang
+        let diff = wantAng - this.localAng
+        while (diff > Math.PI) diff -= Math.PI * 2
+        while (diff < -Math.PI) diff += Math.PI * 2
+        this.localAng += diff * Math.min(1, dt * 14)
+        holder.rotation.y = this.localAng
+      } else {
+        holder.rotation.y = p.ang
+      }
       holder.visible = p.alive || i === this.localId
       actor.update(dt, {
         moving: p.moving && p.alive,
-        aiming: i === this.localId && (this.lockFeedbackId >= 0 || this.fireFlashT > 0),
+        aiming: i === this.localId && (this.lockFeedbackId >= 0 || vm.lockId >= 0 || this.fireFlashT > 0),
         speed: 15,
         air: p.y > 0.4,
       })
@@ -623,21 +653,38 @@ export class Session {
         this.renderer().scene.add(holder)
         view = { holder, actor, kind: e.kind }
         this.enemies.set(e.id, view)
+        this.vfx.ring(e.x, e.z, KINDS[e.kind].color)
+        this.vfx.sparkBurst(e.x, 0.6, e.z, 0xb9a67e, 6, 0.35)
       }
       view.holder.position.set(e.x, e.y, e.z)
       const nearest = vm.players.reduce((a, b) =>
         Math.hypot(a.x - e.x, a.z - e.z) < Math.hypot(b.x - e.x, b.z - e.z) ? a : b)
-      view.holder.rotation.y = Math.atan2(nearest.x - e.x, nearest.z - e.z)
+      const ang = e.ang ?? Math.atan2(nearest.x - e.x, nearest.z - e.z)
+      view.holder.rotation.y = ang
       // Flinch when launched hard (knockback velocity estimate).
       const vel = Math.hypot(e.x - (view.lastX ?? e.x), e.z - (view.lastZ ?? e.z)) / Math.max(dt, 1e-4)
       if (e.y > 0.05 && vel > 24) view.actor.hit()
       view.lastX = e.x
       view.lastZ = e.z
+      const vx = e.vx ?? 0
+      const vz = e.vz ?? 0
+      const moveSpeed = Math.hypot(vx, vz)
+      // Lateral component in enemy local space for directional strafe lean.
+      const rightX = Math.cos(ang)
+      const rightZ = -Math.sin(ang)
+      const strafe = Math.max(-1, Math.min(1, (vx * rightX + vz * rightZ) / Math.max(1, KINDS[e.kind].speed)))
       view.actor.update(dt, {
-        moving: e.kind !== 'BOSS' || Math.hypot(nearest.x - e.x, nearest.z - e.z) > 24,
+        moving: moveSpeed > 0.6 && (e.kind !== 'BOSS' || Math.hypot(nearest.x - e.x, nearest.z - e.z) > 24),
         aiming: KINDS[e.kind].gun,
-        speed: 3 + KINDS[e.kind].speed * 0.9,
+        speed: 3 + moveSpeed * 0.9,
         air: e.y > 0.5,
+        strafe,
+        stagger: (e.stag ?? 0) > 0.02,
+        windup: Math.min(1, (e.windup ?? 0) / 0.55),
+        recover: Math.min(1, (e.recover ?? 0) / 0.35),
+        onStep: e.kind === 'BOSS' || e.kind === 'GRUNT'
+          ? () => this.vfx.sparkBurst(e.x, 0.3, e.z, 0x8a8272, e.kind === 'BOSS' ? 5 : 2, e.kind === 'BOSS' ? 0.38 : 0.2)
+          : undefined,
       })
       this.labels.ensure(e.id, e.kind)
       this.labels.update(
