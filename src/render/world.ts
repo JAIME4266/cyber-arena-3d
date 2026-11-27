@@ -50,20 +50,33 @@ export class World {
   readonly keyLight: THREE.DirectionalLight
   readonly playerLight: THREE.PointLight
   readonly boomLight: THREE.PointLight
+  private readonly hemiLight: THREE.HemisphereLight
+  private readonly scene: THREE.Scene
   private readonly dust: THREE.Points
   private readonly sky: THREE.Mesh
   private readonly padBeaconMat: THREE.MeshStandardMaterial
+  private readonly floodHeadMat: THREE.MeshStandardMaterial
+  private readonly floodConeMat: THREE.MeshBasicMaterial
+  private readonly targetBg = new THREE.Color(0xb8b2a2)
+  private readonly targetFog = new THREE.Color(0xbdb5a3)
+  private readonly targetSun = new THREE.Color(0xffd2a0)
+  private readonly targetBeacon = new THREE.Color(0xe89b32)
+  private targetFogDensity = 0.0019
+  private targetSunIntensity = 2.4
+  private dustRate = 0.01
   private t = 0
   private readonly disposables: Array<{ dispose(): void }> = []
   private heroAdded = false
   private readonly offAssetsReady: () => void
 
   constructor(scene: THREE.Scene) {
+    this.scene = scene
     scene.background = new THREE.Color(0xb8b2a2)
     scene.fog = new THREE.FogExp2(0xbdb5a3, 0.0019)
 
     /* ---------- lights: golden hour, overcast breaking ---------- */
-    scene.add(new THREE.HemisphereLight(0xb9c3cf, 0x8a7f6a, 0.75))
+    this.hemiLight = new THREE.HemisphereLight(0xb9c3cf, 0x8a7f6a, 0.75)
+    scene.add(this.hemiLight)
     this.keyLight = new THREE.DirectionalLight(0xffd2a0, 2.4)
     this.keyLight.castShadow = true
     this.keyLight.shadow.mapSize.set(1024, 1024)
@@ -209,12 +222,13 @@ export class World {
     {
       const N = 28
       const poleMat = new THREE.MeshStandardMaterial({ color: 0x3d4038, roughness: 0.6, metalness: 0.7 })
-      const headMat = new THREE.MeshStandardMaterial({ color: 0x2a2c26, roughness: 0.5, metalness: 0.6, emissive: 0xffd9a0, emissiveIntensity: 0.35 })
+      this.floodHeadMat = new THREE.MeshStandardMaterial({ color: 0x2a2c26, roughness: 0.5, metalness: 0.6, emissive: 0xffd9a0, emissiveIntensity: 0.35 })
+      this.floodConeMat = new THREE.MeshBasicMaterial({ color: 0xffe4b8, transparent: true, opacity: 0.045, blending: THREE.AdditiveBlending, depthWrite: false })
       const poles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 15, 0.9), poleMat, N)
-      const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(3.4, 1.4, 1.2), headMat, N)
+      const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(3.4, 1.4, 1.2), this.floodHeadMat, N)
       const cones = new THREE.InstancedMesh(
         new THREE.ConeGeometry(4.2, 10.5, 8, 1, true),
-        new THREE.MeshBasicMaterial({ color: 0xffe4b8, transparent: true, opacity: 0.045, blending: THREE.AdditiveBlending, depthWrite: false }),
+        this.floodConeMat,
         N,
       )
       const mt = new THREE.Matrix4()
@@ -608,10 +622,54 @@ export class World {
     })
   }
 
+  /** Smoothly transition lighting & atmospheric state across waves and boss encounters. */
+  setAtmosphere(wave: number, bossActive: boolean): void {
+    if (bossActive || wave >= 3) {
+      this.targetBg.setHex(0x887b75)
+      this.targetFog.setHex(0x8d7f78)
+      this.targetSun.setHex(0xeba888)
+      this.targetBeacon.setHex(0xe84a2c)
+      this.targetFogDensity = 0.0024
+      this.targetSunIntensity = 2.0
+      this.dustRate = 0.025
+      this.floodHeadMat.emissiveIntensity = 0.9
+      this.floodConeMat.opacity = 0.075
+    } else if (wave === 2) {
+      this.targetBg.setHex(0xa89d8d)
+      this.targetFog.setHex(0xad9f8c)
+      this.targetSun.setHex(0xffbc78)
+      this.targetBeacon.setHex(0xe88a2c)
+      this.targetFogDensity = 0.0021
+      this.targetSunIntensity = 2.25
+      this.dustRate = 0.016
+      this.floodHeadMat.emissiveIntensity = 0.65
+      this.floodConeMat.opacity = 0.06
+    } else {
+      this.targetBg.setHex(0xb8b2a2)
+      this.targetFog.setHex(0xbdb5a3)
+      this.targetSun.setHex(0xffd2a0)
+      this.targetBeacon.setHex(0xe89b32)
+      this.targetFogDensity = 0.0019
+      this.targetSunIntensity = 2.4
+      this.dustRate = 0.01
+      this.floodHeadMat.emissiveIntensity = 0.35
+      this.floodConeMat.opacity = 0.045
+    }
+  }
+
   update(dt: number, px: number, pz: number, cameraPos: THREE.Vector3): void {
     this.t += dt
+    const k = Math.min(1, dt * 1.5)
+    if (this.scene.background instanceof THREE.Color) this.scene.background.lerp(this.targetBg, k)
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.lerp(this.targetFog, k)
+      this.scene.fog.density += (this.targetFogDensity - this.scene.fog.density) * k
+    }
+    this.keyLight.color.lerp(this.targetSun, k)
+    this.keyLight.intensity += (this.targetSunIntensity - this.keyLight.intensity) * k
+    this.padBeaconMat.emissive.lerp(this.targetBeacon, k)
     this.padBeaconMat.emissiveIntensity = 0.55 + 0.35 * Math.sin(this.t * 2.6)
-    this.dust.rotation.y += dt * 0.01
+    this.dust.rotation.y += dt * this.dustRate
     this.sky.position.copy(cameraPos)
     // Low western sun: constant direction relative to the player (shadow follows).
     this.keyLight.position.set(px - 85, 48, pz + 32)
