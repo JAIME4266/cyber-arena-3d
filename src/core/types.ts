@@ -1,7 +1,8 @@
 /** Shared types for the simulation, the view layer and the network protocol. */
 import type { EnemyKind } from './constants'
+import type { CurriculumSnapshot } from './typing'
 
-export type { EnemyKind }
+export type { EnemyKind, CurriculumSnapshot }
 
 export interface InputState {
   /** Movement axes, each -1 | 0 | 1 (screen-space: x right, z down). */
@@ -133,7 +134,7 @@ export interface Mortar {
 }
 
 export type SimEvent =
-  | { t: 'kill'; id: number; x: number; z: number; kind: EnemyKind; by: number; combo: number; milestone: boolean
+  | { t: 'kill'; id: number; x: number; z: number; kind: EnemyKind; by: number; combo: number; milestone: boolean; speedKill?: boolean
       /** Ragdoll launch: impulse direction (normalized-ish), spin rate, lift. */
       dx?: number; dz?: number; spin?: number; vy?: number }
   | { t: 'hurt'; p: number; x: number; z: number }
@@ -220,6 +221,10 @@ export interface ViewModel {
   bossMax: number
   /** Which enemy the local player is locked onto (-1 = none). */
   lockId: number
+  /** Best candidate enemy to lock next when unlocked (-1 = none). */
+  candidateId?: number
+  /** Hybrid curriculum vocabulary mastery snapshot. */
+  curriculum?: CurriculumSnapshot
 }
 
 /* ---------- Network snapshots (compact, array-of-arrays) ---------- */
