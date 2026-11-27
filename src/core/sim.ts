@@ -27,7 +27,7 @@ import type {
   Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, PhysProp, Shock, SimEvent, Snapshot, Mortar,
 } from './types'
 import { ENEMY_KIND_ORDER, emptyInput } from './types'
-import { adaptiveEnemySpeedScale, selectTrainingWord } from './typing'
+import { CurriculumTracker, adaptiveEnemySpeedScale } from './typing'
 import { wpm } from './stats'
 
 export interface MoveCtx {
@@ -212,6 +212,9 @@ export class Sim {
   private nextBulletId = 0
   readonly bulletIds: number[] = []
   readonly spawnedIds: number[] = []
+  readonly curriculum = new CurriculumTracker()
+  private readonly lockStartedAt = new Map<number, number>()
+  private readonly wordDirty = new Set<number>()
 
   constructor(opts: SimOptions) {
     this.seed = opts.seed
@@ -319,6 +322,34 @@ export class Sim {
 
   /* ------------------------------------------------ typing (combat) ------------------------------------------------ */
 
+  /** Threat-weighted target priority (lower = higher priority). */
+  private targetPriorityScore(p: PlayerState, e: Enemy): number {
+    const d = Math.hypot(e.x - p.x, e.z - p.z)
+    const threatBoost = (e.windup > 0 ? 18 : 0) + (e.kind === 'ELITE' ? 6 : e.kind === 'RUNNER' ? 4 : e.kind === 'FLANKER' ? 3 : 0)
+    const progressBoost = e.ti > 0 ? 8 : 0
+    // Slightly prioritize enemies approaching from the lower (+Z) side so they don't slip under the HUD.
+    const lowerBias = e.z > p.z + 6 ? 4 : 0
+    const partnerLocked = this.players.some(o => o.id !== p.id && o.alive && o.lockId === e.id) ? 14 : 0
+    return d - threatBoost - progressBoost - lowerBias + partnerLocked
+  }
+
+  /** Recommended primary target id for highlighting before the player starts typing. */
+  bestTargetId(pid: number): number {
+    const p = this.players[pid]
+    if (!p || !p.alive || !this.enemies.length) return -1
+    if (p.lockId >= 0) {
+      const locked = this.enemies.find(e => e.id === p.lockId)
+      if (locked) return locked.id
+    }
+    let best: Enemy | null = null
+    let bestScore = Infinity
+    for (const e of this.enemies) {
+      const s = this.targetPriorityScore(p, e)
+      if (s < bestScore) { bestScore = s; best = e }
+    }
+    return best ? best.id : -1
+  }
+
   typeKey(pid: number, ch: string): KeyResult {
     const p = this.players[pid]
     if (!p || !p.alive || this.over !== 0) return 'none'
@@ -326,27 +357,31 @@ export class Sim {
 
     let target: Enemy | null
     const locked = p.lockId >= 0 ? this.enemies.find(e => e.id === p.lockId) : undefined
+    if (p.lockId >= 0 && !locked) p.lockId = -1 // clear stale lock immediately
     if (locked) {
       target = locked.seq[locked.ti] === ch ? locked : null
       if (!target) {
-        // Miss on a locked target: reset its sequence, break combo.
+        // Miss on a locked target: record for review, reset sequence, break combo.
+        this.wordDirty.add(locked.id)
+        this.curriculum.recordResult(locked.seq, false)
         locked.ti = 0
         p.lockId = -1
         this.miss(p)
         return 'miss'
       }
     } else {
-      // No lock: pick the NEAREST enemy whose next letter matches.
+      // No lock: pick the highest-priority valid enemy whose next letter matches.
       let best: Enemy | null = null
-      let bestD = Infinity
+      let bestScore = Infinity
       for (const e of this.enemies) {
         if (e.seq[e.ti] === ch) {
-          const d = Math.hypot(e.x - p.x, e.z - p.z)
-          if (d < bestD) { bestD = d; best = e }
+          const s = this.targetPriorityScore(p, e)
+          if (s < bestScore) { bestScore = s; best = e }
         }
       }
       target = best
       if (!target) { this.miss(p); return 'miss' }
+      this.lockStartedAt.set(pid, this.time)
     }
 
     p.lockId = target.id
@@ -366,8 +401,18 @@ export class Sim {
       target.stag = Math.max(target.stag, 0.08 * poise)
     }
     if (target.ti >= target.seq.length) {
+      const startT = this.lockStartedAt.get(pid) ?? this.time
+      const durationMs = Math.max(100, (this.time - startT) * 1000)
+      const clean = !this.wordDirty.has(target.id)
+      this.wordDirty.delete(target.id)
+      this.curriculum.recordResult(target.seq, clean, durationMs)
+      const speedKill = clean && this.time > 0.25 && durationMs < target.seq.length * 230
       p.lockId = -1
-      this.completeSequence(p, target)
+      this.completeSequence(p, target, speedKill)
+      if (speedKill && p.combo >= 5) {
+        p.combo++
+        p.bestCombo = Math.max(p.bestCombo, p.combo)
+      }
       return 'complete'
     }
     return 'advance'
@@ -379,7 +424,7 @@ export class Sim {
     p.comboT = 0
   }
 
-  private completeSequence(p: PlayerState, e: Enemy): void {
+  private completeSequence(p: PlayerState, e: Enemy, speedKill = false): void {
     if (e.kind === 'BOSS' && --e.hp > 0) {
       // Boss survives: new sequence, maybe a phase change.
       const oldPhase = this.bossPhase
@@ -391,13 +436,14 @@ export class Sim {
       if (this.bossPhase !== oldPhase) this.events.push({ t: 'bossphase', phase: this.bossPhase })
       return
     }
-    this.killEnemy(e, p)
+    this.killEnemy(e, p, speedKill)
   }
 
-  private killEnemy(e: Enemy, by: PlayerState | null): void {
+  private killEnemy(e: Enemy, by: PlayerState | null, speedKill = false): void {
     const i = this.enemies.indexOf(e)
     if (i < 0) return
     this.enemies.splice(i, 1)
+    this.wordDirty.delete(e.id)
     for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
     this.kills++
     // Ragdoll launch: away from the shooter, spun by the impact.
@@ -412,7 +458,7 @@ export class Sim {
     }
     this.events.push({
       t: 'kill', id: e.id, x: e.x, z: e.z, kind: e.kind, by: by ? by.id : -1,
-      combo: by ? by.combo : 0, milestone: this.kills % 10 === 0,
+      combo: by ? by.combo : 0, milestone: this.kills % 10 === 0, speedKill,
       dx: Math.round((dx / dl) * 100) / 100, dz: Math.round((dz / dl) * 100) / 100,
       spin: Math.round(spin * 10) / 10, vy: Math.round(lift * 10) / 10,
     })
@@ -527,8 +573,8 @@ export class Sim {
   /* ------------------------------------------------ waves & spawning ------------------------------------------------ */
 
   private mkSeq(kind: EnemyKind): string {
-    const word = selectTrainingWord(kind, this.kills, this.rng.int(1000))
-    return word.toUpperCase()
+    const active = new Set(this.enemies.map(e => e.seq))
+    return this.curriculum.pickWord(kind, this.wave, this.kills, active, this.rng)
   }
 
   private startWave(w: number): void {
