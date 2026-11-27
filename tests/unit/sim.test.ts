@@ -18,22 +18,35 @@ describe('waves', () => {
     drive(sim, 5)
     expect(sim.enemies.length).toBeGreaterThan(0)
     expect(sim.enemies.length).toBeLessThanOrEqual(14)
+    expect(sim.enemies.every(e => e.seq === e.seq.toUpperCase())).toBe(true)
+    expect(sim.enemies.every(e => e.seq.length >= 3)).toBe(true)
   })
 
-  it('transitions to wave 2 at 50 kills; every wave-2 enemy has a 2-key combo', () => {
+  it('accepts uppercase keyboard input for generated training words', () => {
+    const sim = new Sim({ seed: 'typing-input', playerCount: 1 })
+    drive(sim, 5)
+    const target = firstEnemy(sim)
+    expect(target.seq.length).toBeGreaterThan(1)
+    expect(sim.typeKey(0, target.seq[0]!)).toBe('advance')
+  })
+
+  it('transitions to wave 2 at 50 kills; wave-2 enemies use unlocked 4-5 letter words', () => {
     const sim = new Sim({ seed: 'w2', playerCount: 1 })
     drive(sim, 5)
     sim.debugAddKills(50)
     drive(sim, 5)
     expect(sim.wave).toBe(2)
     expect(sim.events.some(e => e.t === 'wave' && e.w === 2)).toBe(true)
-    // Clear the wave-1 leftovers (1-char sequences).
+    // Clear the wave-1 leftovers.
     for (const e of [...sim.enemies]) {
       while (sim.enemies.includes(e)) sim.debugTypeAt(0, e.seq[e.ti]!, e.id)
     }
     drive(sim, 5)
     expect(sim.enemies.length).toBeGreaterThan(0)
-    for (const e of sim.enemies) expect(e.seq.length).toBe(2)
+    for (const e of sim.enemies) {
+      expect(e.seq.length).toBeGreaterThanOrEqual(4)
+      expect(e.seq.length).toBeLessThanOrEqual(5)
+    }
   })
 
   it('wave-2 mix is elite-heavy, wave-1 grunt-heavy (pickKind distribution)', () => {
@@ -57,6 +70,7 @@ describe('waves', () => {
     expect(sim.wave).toBe(3)
     expect(sim.boss).not.toBeNull()
     expect(sim.boss!.kind).toBe('BOSS')
+    expect(sim.boss!.seq.length).toBe(7)
     expect(sim.enemies.filter(e => e.kind !== 'BOSS').length).toBe(0)
     expect(sim.events.some(e => e.t === 'boss')).toBe(true)
   })
@@ -92,7 +106,7 @@ describe('combat', () => {
   it('MISS BREAKS THE COMBO (the fix the original README promised)', () => {
     const sim = new Sim({ seed: 'c2', playerCount: 1 })
     drive(sim, 5)
-    sim.debugAddKills(50) // wave 2: every sequence is 2 keys
+    sim.debugAddKills(50)
     drive(sim, 5)
     // Cull wave-1 leftovers so wave-2 spawns refill the field.
     for (const e of [...sim.enemies]) {
@@ -100,9 +114,9 @@ describe('combat', () => {
     }
     drive(sim, 5)
     expect(sim.enemies.length).toBeGreaterThan(0)
-    // Grab a wave-2 spawn (2-char seq).
+    // Grab a wave-2 spawn (multi-letter word).
     const e = sim.enemies[0]!
-    expect(e.seq.length).toBe(2)
+    expect(e.seq.length).toBeGreaterThanOrEqual(4)
     // Advance one correct letter to build the lock + grow the combo.
     const comboBefore = sim.players[0]!.combo
     expect(sim.debugTypeAt(0, e.seq[0]!, e.id)).toBe('advance')
@@ -119,8 +133,7 @@ describe('combat', () => {
   it('typing a key matching nothing counts as a miss', () => {
     const sim = new Sim({ seed: 'c3', playerCount: 1 })
     drive(sim, 5)
-    // Wave 1: 6 enemies, each with a 1-char sequence — at most 6 of the 13
-    // keys are covered, so a guaranteed-free key always exists.
+    // A guaranteed-free key exists outside the currently spawned sequences.
     const candidates = new Set(sim.enemies.map(e => e.seq[e.ti]))
     const dead = KEYS.find(k => !candidates.has(k))
     expect(dead).toBeDefined()

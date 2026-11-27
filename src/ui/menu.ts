@@ -156,7 +156,7 @@ export function howToPlayContent(card: HTMLElement): void {
     'Correct keys build a STREAK. Miss or get hit — the streak breaks.',
     'The streak feeds ADRENALINE: faster movement, multiplied score.',
     'THREAT climbs with kills: the range gets meaner. Waves at 50 and 100 kills.',
-    'Wave 2: Gunners fire low — jump their rounds. They need 2-key sequences.',
+    'Wave 2: Gunners fire low — jump their rounds. Reach words unlock next.',
     'Wave 3: the JUGGERNAUT. Blast waves, bullet rings, aimed volleys.',
     'Yellow-green GAS clouds halve your speed. White MED KITS restore armor plates.',
   ]) ul.append(el('li', '', t))

@@ -138,7 +138,7 @@ export class Hud {
     // Status line + controls hint
     const bottom = el('div', 'u hud-bottom')
     this.statusEl = el('div', 'p status', 'RANGE HOT')
-    const hint = el('div', 'p hint', 'MOVE ARROWS · TYPE HOME ROW A S D F G H J K L ; \' · SPACE JUMP · SHIFT SPRINT · ESC PAUSE')
+    const hint = el('div', 'p hint', 'HOME ROW ANCHORED · KEEP F/J ON YOUR INDEXES · SPACE JUMP · SHIFT SPRINT · ESC PAUSE')
     bottom.append(this.statusEl, hint)
 
     const pauseBtn = el('button', 'u pause-btn', 'II')
@@ -204,7 +204,7 @@ export class Hud {
         : (p?.combo ?? 0) >= 7
           ? `ADRENALINE RUSH ${p!.combo}x`
           : vm.wave === 2
-            ? 'GUNNERS: 2-KEY SEQUENCES'
+            ? 'GUNNERS: MULTI-LETTER WORDS'
             : vm.wave === 3
               ? 'JUGGERNAUT — JUMP THE BLAST WAVES'
               : 'RANGE HOT'

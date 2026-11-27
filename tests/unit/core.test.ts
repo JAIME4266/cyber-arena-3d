@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { RNG, hashString, isValidCode, randomCode } from '../../src/core/rng'
 import { decode, encode, inputToMsg, msgToInput, type NetMsg } from '../../src/core/protocol'
 import { accuracy, dailySeed, formatClock, formatScore, rank, wpm } from '../../src/core/stats'
+import { adaptiveEnemySpeedScale, enemyWordLength, selectTrainingWord, trainingStage } from '../../src/core/typing'
 
 describe('rng', () => {
   it('same seed → identical sequence', () => {
@@ -113,5 +114,35 @@ describe('stats', () => {
 
   it('daily seed is date-stable', () => {
     expect(dailySeed(new Date(2026, 10, 25))).toBe('daily-2026-11-25')
+  })
+})
+
+describe('adaptive typing curriculum', () => {
+  it('starts with home-row training and unlocks stages at wave boundaries', () => {
+    expect(trainingStage(0)).toBe(1)
+    expect(trainingStage(49)).toBe(1)
+    expect(trainingStage(50)).toBe(2)
+    expect(trainingStage(100)).toBe(3)
+  })
+
+  it('extends enemy words as the stage advances', () => {
+    expect(enemyWordLength('RUNNER', 1)).toBe(3)
+    expect(enemyWordLength('RUNNER', 2)).toBe(4)
+    expect(enemyWordLength('RUNNER', 3)).toBe(5)
+  })
+
+  it('selects a word at the exact curriculum length for every enemy and stage', () => {
+    const kinds = ['RUNNER', 'GRUNT', 'ELITE', 'BOSS'] as const
+    for (const kills of [0, 50, 100]) {
+      for (const kind of kinds) {
+        expect(selectTrainingWord(kind, kills, 0).length).toBe(enemyWordLength(kind, trainingStage(kills)))
+      }
+    }
+  })
+
+  it('slows the arena for slow typists and reaches full pace at 100 WPM', () => {
+    expect(adaptiveEnemySpeedScale(15)).toBeCloseTo(0.55)
+    expect(adaptiveEnemySpeedScale(100)).toBe(1)
+    expect(adaptiveEnemySpeedScale(150)).toBe(1)
   })
 })

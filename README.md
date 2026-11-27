@@ -35,8 +35,8 @@ deployed on GitHub Pages with serverless P2P squad co-op.
 - Correct keys build a **STREAK**. A miss or getting hit breaks it.
 - The streak feeds **ADRENALINE**: faster movement, multiplied score.
 - **THREAT** ramps with kills — the range gets meaner.
-- Wave 2 at 50 kills: Gunners firing low rounds (jump them) that need 2-key
-  sequences.
+- Wave 2 at 50 kills: Gunners fire low rounds (jump them) and targets unlock
+  progressive real-word sequences.
 - Wave 3 at 100 kills: the **JUGGERNAUT** with 3 phases — blast waves,
   bullet rings, aimed volleys and grunt reinforcements.
 - Yellow-green GAS domes halve your speed. White MED KITS restore armor plates.
