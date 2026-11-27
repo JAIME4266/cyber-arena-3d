@@ -26,9 +26,10 @@ export function trainingStage(kills: number): TrainingStage {
   return 3
 }
 
-export function enemyWordLength(kind: 'RUNNER' | 'GRUNT' | 'ELITE' | 'BOSS', stage: TrainingStage): number {
+export function enemyWordLength(kind: 'RUNNER' | 'GRUNT' | 'FLANKER' | 'ELITE' | 'BOSS', stage: TrainingStage): number {
   if (kind === 'BOSS') return stage >= 3 ? 7 : stage === 2 ? 5 : 3
   if (kind === 'RUNNER') return stage === 1 ? 3 : stage === 2 ? 4 : 5
+  if (kind === 'FLANKER') return stage === 1 ? 3 : stage === 2 ? 4 : 5
   if (kind === 'GRUNT') return stage === 1 ? 4 : stage === 2 ? 5 : 6
   return stage === 1 ? 4 : stage === 2 ? 5 : 7
 }
@@ -39,7 +40,7 @@ export function adaptiveEnemySpeedScale(wpm: number): number {
   return 0.55 + ((wpm - 15) / 85) * 0.45
 }
 
-export function selectTrainingWord(kind: 'RUNNER' | 'GRUNT' | 'ELITE' | 'BOSS', kills: number, index: number): string {
+export function selectTrainingWord(kind: 'RUNNER' | 'GRUNT' | 'FLANKER' | 'ELITE' | 'BOSS', kills: number, index: number): string {
   const stage = trainingStage(kills)
   const pool = stage === 1 ? STAGE_ONE_WORDS : stage === 2 ? STAGE_TWO_WORDS : STAGE_THREE_WORDS
   const desired = enemyWordLength(kind, stage)
