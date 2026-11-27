@@ -52,6 +52,8 @@ export class World {
   readonly boomLight: THREE.PointLight
   private readonly dust: THREE.Points
   private readonly sky: THREE.Mesh
+  private readonly padBeaconMat: THREE.MeshStandardMaterial
+  private t = 0
   private readonly disposables: Array<{ dispose(): void }> = []
   private heroAdded = false
   private readonly offAssetsReady: () => void
@@ -178,6 +180,25 @@ export class World {
     pad.renderOrder = 1
     scene.add(pad)
 
+    /* ---------- helipad perimeter beacons ---------- */
+    this.padBeaconMat = new THREE.MeshStandardMaterial({
+      color: 0x3b3d36,
+      roughness: 0.4,
+      metalness: 0.7,
+      emissive: 0xe89b32,
+      emissiveIntensity: 0.7,
+    })
+    {
+      const beacons = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.45, 0.58, 0.26, 8), this.padBeaconMat, 8)
+      const mt = new THREE.Matrix4()
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + Math.PI / 8
+        mt.makeTranslation(Math.cos(a) * 25.5, 0.13, Math.sin(a) * 25.5)
+        beacons.setMatrixAt(i, mt)
+      }
+      scene.add(beacons)
+    }
+
     /* ---------- base backdrop: barracks, hangar, towers, treeline, hills ---------- */
     this.buildBase(scene)
 
@@ -191,6 +212,11 @@ export class World {
       const headMat = new THREE.MeshStandardMaterial({ color: 0x2a2c26, roughness: 0.5, metalness: 0.6, emissive: 0xffd9a0, emissiveIntensity: 0.35 })
       const poles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 15, 0.9), poleMat, N)
       const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(3.4, 1.4, 1.2), headMat, N)
+      const cones = new THREE.InstancedMesh(
+        new THREE.ConeGeometry(4.2, 10.5, 8, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffe4b8, transparent: true, opacity: 0.045, blending: THREE.AdditiveBlending, depthWrite: false }),
+        N,
+      )
       const mt = new THREE.Matrix4()
       let n = 0
       for (let i = -3; i <= 3; i++) {
@@ -200,11 +226,13 @@ export class World {
           poles.setMatrixAt(n, mt)
           mt.makeTranslation(x, 15.2, z)
           heads.setMatrixAt(n, mt)
+          mt.makeTranslation(x, 9.6, z)
+          cones.setMatrixAt(n, mt)
           n++
         }
       }
       poles.castShadow = true
-      scene.add(poles, heads)
+      scene.add(poles, heads, cones)
     }
 
     /* ---------- obstacles: CONEX containers ---------- */
@@ -483,9 +511,21 @@ export class World {
     this.disposables.push(linkTex)
   }
 
-  /** CONEX shipping containers: corrugated steel with stencil markings. */
+  /** CONEX shipping containers: corrugated steel, frame rails, roof ribs & contact AO. */
   private buildContainers(scene: THREE.Scene): void {
     const STENCILS = ['ORDNANCE', '5.56 MM', 'SUPPLY', 'AMMO LOT 7', 'RATIONS', 'SPARES'] as const
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x2c2f28, roughness: 0.55, metalness: 0.65 })
+    const aoTex = makeTexture(128, (g, s) => {
+      const grad = g.createRadialGradient(s / 2, s / 2, s * 0.15, s / 2, s / 2, s * 0.5)
+      grad.addColorStop(0, 'rgba(10, 10, 8, 0.42)')
+      grad.addColorStop(0.75, 'rgba(10, 10, 8, 0.24)')
+      grad.addColorStop(1, 'rgba(10, 10, 8, 0)')
+      g.fillStyle = grad
+      g.fillRect(0, 0, s, s)
+    })
+    const aoMat = new THREE.MeshBasicMaterial({ map: aoTex, transparent: true, depthWrite: false })
+    this.disposables.push(aoTex)
+
     OBSTACLES.forEach((o, i) => {
       const olive = i % 2 === 0
       const base = olive ? C.olive : C.rust
@@ -535,12 +575,42 @@ export class World {
       body.position.y = o.h / 2
       body.castShadow = body.receiveShadow = true
       g.add(body)
+
+      // Structural frame posts + roof ribs merged into 1 draw call per container.
+      const trimGeos: THREE.BufferGeometry[] = []
+      for (const sx of [-1, 1] as const) {
+        for (const sz of [-1, 1] as const) {
+          const post = new THREE.BoxGeometry(0.65, o.h + 0.15, 0.65)
+          post.translate(sx * (o.hw - 0.15), o.h / 2, sz * (o.hd - 0.15))
+          trimGeos.push(post)
+        }
+      }
+      const ribStep = 2.6
+      for (let rx = -o.hw + 1.5; rx <= o.hw - 1.5; rx += ribStep) {
+        const rib = new THREE.BoxGeometry(0.45, 0.25, o.hd * 1.92)
+        rib.translate(rx, o.h + 0.1, 0)
+        trimGeos.push(rib)
+      }
+      const trimMesh = new THREE.Mesh(mergeGeometries(trimGeos)!, trimMat)
+      trimMesh.castShadow = false
+      for (const tg of trimGeos) tg.dispose()
+      g.add(trimMesh)
+
+      // Ground-contact AO skirt
+      const ao = new THREE.Mesh(new THREE.PlaneGeometry(o.hw * 2 + 3.2, o.hd * 2 + 3.2), aoMat)
+      ao.rotation.x = -Math.PI / 2
+      ao.position.y = 0.04
+      g.add(ao)
+
       g.position.set(o.x, 0, o.z)
       scene.add(g)
+      this.disposables.push(tex)
     })
   }
 
   update(dt: number, px: number, pz: number, cameraPos: THREE.Vector3): void {
+    this.t += dt
+    this.padBeaconMat.emissiveIntensity = 0.55 + 0.35 * Math.sin(this.t * 2.6)
     this.dust.rotation.y += dt * 0.01
     this.sky.position.copy(cameraPos)
     // Low western sun: constant direction relative to the player (shadow follows).
