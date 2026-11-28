@@ -13,7 +13,7 @@
 import { RNG } from './rng'
 import { blastImpulse, stepProps, wakeProp, PROP_MASS } from './physics'
 import {
-  ARENA, BULLET_LIFE, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
+  ARENA, BULLET_LIFE, COMBAT_ANCHOR_Z, COMBAT_FACING, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
   COMBO_WINDOW, DASH_CD, DASH_INV, DASH_MULT, DASH_TIME, GRAVITY, INV_TIME, JUMP_VY,
   KEYS, KINDS, LIVES_MAX, OBSTACLES, PICKUP_LIFE, PLAYER_ACCEL, PLAYER_AIR_ACCEL, PLAYER_KNOCK_DECAY,
   PLAYER_PUSH_FORCE, PLAYER_RADIUS, PLAYER_SPEED, LAND_BOUNCE,
@@ -26,8 +26,8 @@ import {
 import type {
   Bubble, Bullet, Enemy, InputState, KeyResult, Pickup, PlayerState, PhysProp, Shock, SimEvent, Snapshot, Mortar,
 } from './types'
-import { emptyInput } from './types'
-import { adaptiveEnemySpeedScale, selectTrainingWord } from './typing'
+import { ENEMY_KIND_ORDER, emptyInput } from './types'
+import { CurriculumTracker, adaptiveEnemySpeedScale } from './typing'
 import { wpm } from './stats'
 
 export interface MoveCtx {
@@ -152,14 +152,15 @@ export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx:
   if (wantAng !== null) p.ang = lerpAngle(p.ang, wantAng, Math.min(1, dt * 12))
 }
 
-function makePlayer(id: number, name: string): PlayerState {
+function makePlayer(id: number, name: string, total = 1): PlayerState {
+  const x = total > 1 ? (id === 0 ? -4.5 : 4.5) : 0
   return {
     id, name, alive: true,
-    x: id === 0 ? -4 : 4, z: 0, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0,
-    ang: id === 0 ? Math.PI / 2 : -Math.PI / 2, facing: 0,
+    x, z: COMBAT_ANCHOR_Z, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0,
+    ang: COMBAT_FACING, facing: COMBAT_FACING,
     lives: LIVES_MAX, inv: 0, score: 0, kills: 0,
     combo: 0, comboT: 0, bestCombo: 0, correct: 0, wrong: 0,
-    dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: 1, moving: false,
+    dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: -1, moving: false,
     lockId: -1, slowed: false,
   }
 }
@@ -172,9 +173,10 @@ export interface SimOptions {
 
 /** Picks the enemy mix for a wave. Exported pure for unit testing. */
 export function pickKind(wave: number, rng: RNG): EnemyKind {
-  if (wave === 1) return rng.chance(0.35) ? 'RUNNER' : 'GRUNT'
-  if (wave === 2) return rng.chance(0.65) ? 'ELITE' : 'RUNNER'
-  return rng.chance(0.5) ? 'GRUNT' : 'RUNNER'
+  const r = rng.next()
+  if (wave === 1) return r < 0.35 ? 'RUNNER' : r < 0.60 ? 'FLANKER' : 'GRUNT'
+  if (wave === 2) return r < 0.65 ? 'ELITE' : r < 0.85 ? 'FLANKER' : 'RUNNER'
+  return r < 0.50 ? 'GRUNT' : r < 0.75 ? 'FLANKER' : 'RUNNER'
 }
 
 /** Live enemy cap per wave — ramps with kills like the original game. */
@@ -211,13 +213,17 @@ export class Sim {
   private nextBulletId = 0
   readonly bulletIds: number[] = []
   readonly spawnedIds: number[] = []
+  readonly curriculum = new CurriculumTracker()
+  private readonly lockStartedAt = new Map<number, number>()
+  private readonly wordDirty = new Set<number>()
+  private readonly preferredIds = new Map<number, number>()
 
   constructor(opts: SimOptions) {
     this.seed = opts.seed
     this.rng = new RNG(opts.seed)
     const names = opts.names ?? ['PLAYER 1', 'PLAYER 2']
-    this.players = [makePlayer(0, opts.playerCount > 1 ? names[0] : names[0])]
-    if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1]))
+    this.players = [makePlayer(0, names[0], opts.playerCount)]
+    if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1], opts.playerCount))
     this.rollBubbles()
     this.rollProps()
     // Initial spawn wave happens on first step.
@@ -232,8 +238,9 @@ export class Sim {
     this.props = []
     const centers: Array<[number, number]> = []
     const centerOk = (x: number, z: number): boolean =>
-      Math.hypot(x, z) > 18 && Math.hypot(x, z) < 44
-        && Math.hypot(x + 4, z) > 16 && Math.hypot(x - 4, z) > 16
+      Math.hypot(x, z) > 16 && Math.hypot(x, z) < 46
+        && Math.hypot(x, z - COMBAT_ANCHOR_Z) > 16
+        && Math.hypot(x + 4.5, z - COMBAT_ANCHOR_Z) > 14 && Math.hypot(x - 4.5, z - COMBAT_ANCHOR_Z) > 14
         && !circleHitsObstacle(x, z, 6, OBSTACLES)
         && centers.every(c => Math.hypot(x - c[0], z - c[1]) > 26)
         && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 8)
@@ -269,6 +276,7 @@ export class Sim {
         x = this.rng.range(-1, 1) * 58
         z = this.rng.range(-1, 1) * 58
         ok = Math.hypot(x, z) > 13
+          && Math.hypot(x, z - COMBAT_ANCHOR_Z) > 15
           && !circleHitsObstacle(x, z, r + 2, OBSTACLES)
           && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 3)
           && this.props.every(p => Math.hypot(x - p.x, z - p.z) > 9)
@@ -294,7 +302,7 @@ export class Sim {
         x = this.rng.range(-1, 1) * (ARENA - 18)
         z = this.rng.range(-1, 1) * (ARENA - 18)
         tries++
-      } while ((Math.hypot(x, z) < 24 || circleHitsObstacle(x, z, r, OBSTACLES)) && tries < 30)
+      } while ((Math.hypot(x, z) < 20 || Math.hypot(x, z - COMBAT_ANCHOR_Z) < 18 || circleHitsObstacle(x, z, r, OBSTACLES)) && tries < 30)
       this.bubbles.push({ x, z, r })
     }
   }
@@ -318,6 +326,50 @@ export class Sim {
 
   /* ------------------------------------------------ typing (combat) ------------------------------------------------ */
 
+  /** Threat-weighted target priority (lower = higher priority). */
+  private targetPriorityScore(p: PlayerState, e: Enemy): number {
+    const d = Math.hypot(e.x - p.x, e.z - p.z)
+    const threatBoost = (e.windup > 0 ? 18 : 0) + (e.kind === 'ELITE' ? 6 : e.kind === 'RUNNER' ? 4 : e.kind === 'FLANKER' ? 3 : 0)
+    const progressBoost = e.ti > 0 ? 8 : 0
+    const preferBoost = this.preferredIds.get(p.id) === e.id ? 26 : 0
+    // Slightly prioritize enemies approaching from the lower (+Z) side so they don't slip under the HUD.
+    const lowerBias = e.z > p.z + 6 ? 4 : 0
+    const partnerLocked = this.players.some(o => o.id !== p.id && o.alive && o.lockId === e.id) ? 14 : 0
+    return d - threatBoost - progressBoost - preferBoost - lowerBias + partnerLocked
+  }
+
+  /** Cycle recommended standby target manually when unlocked (never interrupts an active sequence). */
+  cycleCandidate(pid: number): number {
+    const p = this.players[pid]
+    if (!p || !p.alive || p.lockId >= 0 || this.enemies.length <= 1) return this.bestTargetId(pid)
+    const ordered = [...this.enemies].sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))
+    const cur = this.bestTargetId(pid)
+    const idx = ordered.findIndex(e => e.id === cur)
+    const next = ordered[(idx + 1) % ordered.length]!
+    this.preferredIds.set(pid, next.id)
+    return next.id
+  }
+
+  /** Recommended primary target id for highlighting before the player starts typing. */
+  bestTargetId(pid: number): number {
+    const p = this.players[pid]
+    if (!p || !p.alive || !this.enemies.length) return -1
+    if (p.lockId >= 0) {
+      const locked = this.enemies.find(e => e.id === p.lockId)
+      if (locked) return locked.id
+    }
+    const pref = this.preferredIds.get(pid)
+    if (pref !== undefined && this.enemies.some(e => e.id === pref)) return pref
+    this.preferredIds.delete(pid)
+    let best: Enemy | null = null
+    let bestScore = Infinity
+    for (const e of this.enemies) {
+      const s = this.targetPriorityScore(p, e)
+      if (s < bestScore) { bestScore = s; best = e }
+    }
+    return best ? best.id : -1
+  }
+
   typeKey(pid: number, ch: string): KeyResult {
     const p = this.players[pid]
     if (!p || !p.alive || this.over !== 0) return 'none'
@@ -325,27 +377,31 @@ export class Sim {
 
     let target: Enemy | null
     const locked = p.lockId >= 0 ? this.enemies.find(e => e.id === p.lockId) : undefined
+    if (p.lockId >= 0 && !locked) p.lockId = -1 // clear stale lock immediately
     if (locked) {
       target = locked.seq[locked.ti] === ch ? locked : null
       if (!target) {
-        // Miss on a locked target: reset its sequence, break combo.
+        // Miss on a locked target: record for review, reset sequence, break combo.
+        this.wordDirty.add(locked.id)
+        this.curriculum.recordResult(locked.seq, false)
         locked.ti = 0
         p.lockId = -1
         this.miss(p)
         return 'miss'
       }
     } else {
-      // No lock: pick the NEAREST enemy whose next letter matches.
+      // No lock: pick the highest-priority valid enemy whose next letter matches.
       let best: Enemy | null = null
-      let bestD = Infinity
+      let bestScore = Infinity
       for (const e of this.enemies) {
         if (e.seq[e.ti] === ch) {
-          const d = Math.hypot(e.x - p.x, e.z - p.z)
-          if (d < bestD) { bestD = d; best = e }
+          const s = this.targetPriorityScore(p, e)
+          if (s < bestScore) { bestScore = s; best = e }
         }
       }
       target = best
       if (!target) { this.miss(p); return 'miss' }
+      this.lockStartedAt.set(pid, this.time)
     }
 
     p.lockId = target.id
@@ -354,18 +410,29 @@ export class Sim {
     p.comboT = COMBO_WINDOW
     p.bestCombo = Math.max(p.bestCombo, p.combo)
     target.ti++
-    // Every landed letter is a hit: stagger the target back a step.
+    // Every landed letter is a hit: stagger the target back a step (GRUNT heavy resists knockback).
     if (target.y <= 0.01) {
       const dx = target.x - p.x
       const dz = target.z - p.z
       const d = Math.hypot(dx, dz) || 1
-      target.kx += (dx / d) * 2.4
-      target.kz += (dz / d) * 2.4
-      target.stag = Math.max(target.stag, 0.07)
+      const poise = target.kind === 'GRUNT' ? 0.45 : target.kind === 'RUNNER' ? 1.2 : 1
+      target.kx += (dx / d) * 2.4 * poise
+      target.kz += (dz / d) * 2.4 * poise
+      target.stag = Math.max(target.stag, 0.08 * poise)
     }
     if (target.ti >= target.seq.length) {
+      const startT = this.lockStartedAt.get(pid) ?? this.time
+      const durationMs = Math.max(100, (this.time - startT) * 1000)
+      const clean = !this.wordDirty.has(target.id)
+      this.wordDirty.delete(target.id)
+      this.curriculum.recordResult(target.seq, clean, durationMs)
+      const speedKill = clean && this.time > 0.25 && durationMs < target.seq.length * 230
       p.lockId = -1
-      this.completeSequence(p, target)
+      this.completeSequence(p, target, speedKill)
+      if (speedKill && p.combo >= 5) {
+        p.combo++
+        p.bestCombo = Math.max(p.bestCombo, p.combo)
+      }
       return 'complete'
     }
     return 'advance'
@@ -377,7 +444,7 @@ export class Sim {
     p.comboT = 0
   }
 
-  private completeSequence(p: PlayerState, e: Enemy): void {
+  private completeSequence(p: PlayerState, e: Enemy, speedKill = false): void {
     if (e.kind === 'BOSS' && --e.hp > 0) {
       // Boss survives: new sequence, maybe a phase change.
       const oldPhase = this.bossPhase
@@ -389,13 +456,14 @@ export class Sim {
       if (this.bossPhase !== oldPhase) this.events.push({ t: 'bossphase', phase: this.bossPhase })
       return
     }
-    this.killEnemy(e, p)
+    this.killEnemy(e, p, speedKill)
   }
 
-  private killEnemy(e: Enemy, by: PlayerState | null): void {
+  private killEnemy(e: Enemy, by: PlayerState | null, speedKill = false): void {
     const i = this.enemies.indexOf(e)
     if (i < 0) return
     this.enemies.splice(i, 1)
+    this.wordDirty.delete(e.id)
     for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
     this.kills++
     // Ragdoll launch: away from the shooter, spun by the impact.
@@ -410,7 +478,7 @@ export class Sim {
     }
     this.events.push({
       t: 'kill', id: e.id, x: e.x, z: e.z, kind: e.kind, by: by ? by.id : -1,
-      combo: by ? by.combo : 0, milestone: this.kills % 10 === 0,
+      combo: by ? by.combo : 0, milestone: this.kills % 10 === 0, speedKill,
       dx: Math.round((dx / dl) * 100) / 100, dz: Math.round((dz / dl) * 100) / 100,
       spin: Math.round(spin * 10) / 10, vy: Math.round(lift * 10) / 10,
     })
@@ -452,11 +520,12 @@ export class Sim {
     for (const e of this.enemies) {
       const imp = blastImpulse(e.x, e.z, cx, cz, radius, power, launch)
       if (!imp || e.kind === 'BOSS') continue
-      e.kx += imp.ix * 0.55
-      e.kz += imp.iz * 0.55
-      e.vy = Math.max(e.vy, imp.lift)
+      const poise = e.kind === 'GRUNT' ? 0.55 : e.kind === 'RUNNER' ? 1.15 : 1
+      e.kx += imp.ix * 0.55 * poise
+      e.kz += imp.iz * 0.55 * poise
+      e.vy = Math.max(e.vy, imp.lift * poise)
       e.y = Math.max(e.y, 0.01)
-      e.stag = Math.max(e.stag, 0.45)
+      e.stag = Math.max(e.stag, 0.45 * poise)
       if (Math.hypot(e.x - cx, e.z - cz) < killRadius) victims.push(e)
     }
     for (const e of victims) this.killEnemy(e, by)
@@ -524,8 +593,8 @@ export class Sim {
   /* ------------------------------------------------ waves & spawning ------------------------------------------------ */
 
   private mkSeq(kind: EnemyKind): string {
-    const word = selectTrainingWord(kind, this.kills, this.rng.int(1000))
-    return word.toUpperCase()
+    const active = new Set(this.enemies.map(e => e.seq))
+    return this.curriculum.pickWord(kind, this.wave, this.kills, active, this.rng)
   }
 
   private startWave(w: number): void {
@@ -537,7 +606,7 @@ export class Sim {
         this.enemies.splice(this.enemies.indexOf(e), 1)
         for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
       }
-      const b = this.spawnEnemy('BOSS', 0, -20)
+      const b = this.spawnEnemy('BOSS', 0, -44)
       this.boss = b
       this.bossPhase = 1
       this.events.push({ t: 'boss', hp: b.hp, max: b.maxhp })
@@ -552,18 +621,34 @@ export class Sim {
       x = cx
       z = cz
     } else {
+      const er = KINDS[kind].radius
+      const maxSpawnZ = Math.min(COMBAT_ANCHOR_Z - 14, cz - 10)
       let tries = 0
       do {
-        const a = this.rng.next() * Math.PI * 2
-        const r = 48 + this.rng.next() * 28
+        // Forward-facing cinema combat arc: enemies surge in from ahead (-Z) and wide flanks (±X).
+        const a = -Math.PI * 0.90 + this.rng.next() * (Math.PI * 0.80)
+        const r = 52 + this.rng.next() * 44
         x = Math.max(-ARENA + 5, Math.min(ARENA - 5, cx + Math.cos(a) * r))
-        z = Math.max(-ARENA + 5, Math.min(ARENA - 5, cz + Math.sin(a) * r))
+        z = Math.max(-ARENA + 5, Math.min(maxSpawnZ, cz + Math.sin(a) * r))
         tries++
-      } while (tries < 10 && this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 34))
+      } while (
+        tries < 20 &&
+        (this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 30) ||
+          circleHitsObstacle(x, z, er + 1.5, OBSTACLES) ||
+          this.props.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < er + p.r + 1.5) ||
+          this.enemies.some(o => Math.hypot(o.x - x, o.z - z) < (er + KINDS[o.kind].radius) * 1.6))
+      )
     }
     const e: Enemy = {
       id: this.nextEnemyId++,
-      kind, x, z, y: 0, vy: 0, kx: 0, kz: 0, stag: 0,
+      kind, x, z,
+      vx: 0, vz: 0,
+      ang: Math.atan2(cx - x, cz - z),
+      flankSign: this.rng.next() < 0.5 ? -1 : 1,
+      flankTimer: 2.5 + this.rng.next() * 2.5,
+      windup: 0,
+      recover: 0,
+      y: 0, vy: 0, kx: 0, kz: 0, stag: 0,
       seq: this.mkSeq(kind),
       ti: 0,
       hp: kind === 'BOSS' ? 10 : 1,
@@ -758,16 +843,153 @@ export class Sim {
       const dx = tgt.x - e.x
       const dz = tgt.z - e.z
       const dist = Math.hypot(dx, dz) || 1
+      const nx = dx / dist
+      const nz = dz / dist
       const grounded = e.y <= 0.01
+
+      // Dynamic flank re-evaluation timer (prevents locking onto one stale angle).
+      e.flankTimer -= dt
+      if (e.flankTimer <= 0) {
+        e.flankTimer = e.kind === 'FLANKER' ? 2.4 + this.rng.next() * 2.0 : 3.5 + this.rng.next() * 2.5
+        if (e.kind === 'FLANKER' || this.rng.chance(0.35)) e.flankSign = -e.flankSign
+      }
+      e.recover = Math.max(0, e.recover - dt)
+
       const go = !(def.boss && dist < 24) && grounded && e.stag <= 0
+
+      // Desired velocity by archetype.
+      let desVx = 0
+      let desVz = 0
       if (go) {
-        const sp = def.speed * sm
-        e.x += (dx / dist) * sp * dt
-        e.z += (dz / dist) * sp * dt
+        let sp = def.speed * sm
+        if (e.windup > 0) sp *= 0.22
+        else if (e.recover > 0) sp *= 0.4
+
+        // Prevent enemies from relentlessly shoving into an invulnerable player.
+        const keepOut = tgt.inv > 0 && dist < PLAYER_RADIUS + def.radius + 2.4
+
+        if (e.kind === 'ELITE') {
+          // Tactical range-keeper: approach to ~28 units, then strafe.
+          const radial = keepOut ? -0.4 : dist > 34 ? 1 : dist < 22 ? -0.55 : 0.1
+          const strafe = (dist < 40 ? 0.8 : 0.25) * e.flankSign
+          desVx = (nx * radial - nz * strafe) * sp
+          desVz = (nz * radial + nx * strafe) * sp
+        } else if (e.kind === 'FLANKER') {
+          // Wide curved flank arc that tightens as it closes in.
+          const radial = keepOut ? -0.2 : 1
+          const arc = dist > 26 ? 0.85 : dist > 12 ? 0.55 : 0.2
+          desVx = (nx * radial - nz * arc * e.flankSign) * sp
+          desVz = (nz * radial + nx * arc * e.flankSign) * sp
+        } else if (e.kind === 'RUNNER') {
+          // Aggressive fast approach with agile weave at mid-range.
+          const radial = keepOut ? -0.2 : 1
+          const weave = dist > 10 && dist < 44 ? Math.sin(this.time * 3.5 + e.id * 1.7) * 0.35 * e.flankSign : 0
+          desVx = (nx * radial - nz * weave) * sp
+          desVz = (nz * radial + nx * weave) * sp
+        } else {
+          // GRUNT (heavy) & BOSS: steady, purposeful advance.
+          const radial = keepOut ? 0 : 1
+          const flank = !def.boss && dist > 16 ? 0.14 * e.flankSign : 0
+          desVx = (nx * radial - nz * flank) * sp
+          desVz = (nz * radial + nx * flank) * sp
+        }
+
+        // Separation + blocker sidestepping so packs spread around the player.
+        const desLen = Math.hypot(desVx, desVz) || 1
+        const dirX = desVx / desLen
+        const dirZ = desVz / desLen
+        for (const other of this.enemies) {
+          if (other.id === e.id) continue
+          const sx = e.x - other.x
+          const sz = e.z - other.z
+          const minSep = (def.radius + KINDS[other.kind].radius) * 1.65
+          const d2 = sx * sx + sz * sz
+          if (d2 > 1e-4 && d2 < minSep * minSep) {
+            const sd = Math.sqrt(d2)
+            const push = ((minSep - sd) / minSep) * sp * 1.45
+            desVx += (sx / sd) * push
+            desVz += (sz / sd) * push
+          } else if (d2 >= minSep * minSep && d2 < 100) {
+            // If an ally is directly blocking our forward path, sidestep smoothly.
+            const sd = Math.sqrt(d2)
+            const toOtherX = -sx / sd
+            const toOtherZ = -sz / sd
+            const forwardDot = toOtherX * dirX + toOtherZ * dirZ
+            if (forwardDot > 0.65) {
+              const side = (1 - sd / 10) * sp * 0.85 * e.flankSign
+              desVx += -dirZ * side
+              desVz += dirX * side
+            }
+          }
+        }
+
+        // Obstacle avoidance: proximity push + forward-probe corner bypass (no wall-sticking).
+        const look = def.radius + 5.0
+        const probeDist = def.radius + 8.5
+        const curLen = Math.hypot(desVx, desVz) || 1
+        const fwdX = desVx / curLen
+        const fwdZ = desVz / curLen
+        const probeX = e.x + fwdX * probeDist
+        const probeZ = e.z + fwdZ * probeDist
+        for (const o of OBSTACLES) {
+          const cx = Math.max(o.x - o.hw, Math.min(o.x + o.hw, e.x))
+          const cz = Math.max(o.z - o.hd, Math.min(o.z + o.hd, e.z))
+          const ox = e.x - cx
+          const oz = e.z - cz
+          const od2 = ox * ox + oz * oz
+          if (od2 > 1e-4 && od2 < look * look) {
+            const od = Math.sqrt(od2)
+            const awayX = ox / od
+            const awayZ = oz / od
+            const strength = ((look - od) / look) * sp * 1.75
+            // Pick consistent bypass tangent around the AABB edge.
+            const tx = -awayZ * e.flankSign
+            const tz = awayX * e.flankSign
+            desVx += (awayX + tx * 0.85) * strength
+            desVz += (awayZ + tz * 0.85) * strength
+          } else if (
+            probeX > o.x - o.hw - def.radius && probeX < o.x + o.hw + def.radius &&
+            probeZ > o.z - o.hd - def.radius && probeZ < o.z + o.hd + def.radius
+          ) {
+            // Forward ray sees an obstacle ahead: steer toward the closer corner edge.
+            const leftClear = Math.abs(e.x - (o.x - o.hw))
+            const rightClear = Math.abs((o.x + o.hw) - e.x)
+            const topClear = Math.abs(e.z - (o.z - o.hd))
+            const botClear = Math.abs((o.z + o.hd) - e.z)
+            if (Math.abs(fwdZ) > Math.abs(fwdX)) {
+              const goLeft = leftClear + (e.flankSign < 0 ? -2 : 2) < rightClear
+              desVx += (goLeft ? -1 : 1) * sp * 1.15
+            } else {
+              const goUp = topClear + (e.flankSign < 0 ? -2 : 2) < botClear
+              desVz += (goUp ? -1 : 1) * sp * 1.15
+            }
+          }
+        }
+      }
+
+      // Smooth acceleration / deceleration.
+      const accel = e.kind === 'RUNNER' ? 15 : e.kind === 'FLANKER' ? 13 : e.kind === 'GRUNT' ? 7.5 : 10
+      const kVel = Math.min(1, accel * dt)
+      e.vx += (desVx - e.vx) * kVel
+      e.vz += (desVz - e.vz) * kVel
+
+      if (Math.abs(e.vx) > 0.01 || Math.abs(e.vz) > 0.01) {
+        e.x += e.vx * dt
+        e.z += e.vz * dt
         pushOutOfObstacles(e, def.radius * 0.6, OBSTACLES)
         e.x = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.x))
         e.z = Math.max(-ARENA + 4, Math.min(ARENA - 4, e.z))
       }
+
+      // Smooth turning toward movement direction (or target when ELITE aims/winds up or FLANKER nears).
+      const aimAtTarget = (e.kind === 'ELITE' && (dist < 44 || e.windup > 0)) || (e.kind === 'FLANKER' && dist < 16)
+      const targetAng = aimAtTarget ? Math.atan2(dx, dz) : Math.hypot(e.vx, e.vz) > 0.8 ? Math.atan2(e.vx, e.vz) : Math.atan2(dx, dz)
+      let diff = targetAng - e.ang
+      while (diff > Math.PI) diff -= Math.PI * 2
+      while (diff < -Math.PI) diff += Math.PI * 2
+      const turnRate = e.kind === 'RUNNER' ? 13 : e.kind === 'FLANKER' ? 11 : e.kind === 'BOSS' ? 4 : 8
+      e.ang += diff * Math.min(1, turnRate * dt)
+
       // Enemies path around (and shove) dynamic props.
       for (const q of this.props) {
         if (!q.alive) continue
@@ -777,22 +999,35 @@ export class Sim {
         const d2 = ex * ex + ez * ez
         if (d2 >= min * min || d2 < 1e-6 || !grounded) continue
         const d = Math.sqrt(d2)
-        const nx = ex / d
-        const nz = ez / d
-        e.x = q.x + nx * min
-        e.z = q.z + nz * min
+        const pnx = ex / d
+        const pnz = ez / d
+        e.x = q.x + pnx * min
+        e.z = q.z + pnz * min
         wakeProp(q)
-        q.vx -= nx * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
-        q.vz -= nz * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
+        q.vx -= pnx * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
+        q.vz -= pnz * def.speed * 0.3 * dt * 4 / PROP_MASS[q.kind]
       }
-      // Elite aimed shots (never while staggered or airborne).
+      // Elite aimed shots with readable windup telegraph + recovery cooldown.
       if (def.shoot && e.stag <= 0 && grounded) {
-        e.shootCd -= dt
-        if (dist < 62 && e.shootCd <= 0) {
-          e.shootCd = 3 + this.rng.next() * 2.2
-          this.fireBullet(e.x + (dx / dist) * 3, e.z + (dz / dist) * 3, dx / dist, dz / dist, 34)
-          this.events.push({ t: 'shot', x: e.x, z: e.z, kind: e.kind })
+        if (e.windup > 0) {
+          e.windup -= dt
+          if (e.windup <= 0) {
+            e.windup = 0
+            e.recover = 0.35
+            e.shootCd = 3.2 + this.rng.next() * 2.2
+            this.fireBullet(e.x + nx * 3, e.z + nz * 3, nx, nz, 34)
+            this.events.push({ t: 'shot', id: e.id, x: e.x, z: e.z, kind: e.kind })
+          }
+        } else {
+          e.shootCd -= dt
+          if (dist < 62 && e.shootCd <= 0 && e.recover <= 0) {
+            e.windup = 0.55
+            this.events.push({ t: 'windup', id: e.id, x: e.x, z: e.z, kind: e.kind })
+          }
         }
+      } else if (e.windup > 0) {
+        // Stagger or launch interrupts the attack windup!
+        e.windup = 0
       }
       if (def.boss) this.bossPatterns(e, dt)
       // Contact damage (only while grounded).
@@ -806,7 +1041,7 @@ export class Sim {
       }
     }
 
-    // 2b. Enemy separation (soft push so they don't stack into one column).
+    // 2b. Enemy separation (soft push so they don't stack into one column, clamped out of obstacles).
     for (let i = 0; i < this.enemies.length; i++) {
       const a = this.enemies[i]!
       const ra = KINDS[a.kind].radius
@@ -824,6 +1059,7 @@ export class Sim {
           b.x += dx * push; b.z += dz * push
         }
       }
+      pushOutOfObstacles(a, ra * 0.6, OBSTACLES)
     }
 
     // 3. Bullets — vs players, walls AND dynamic props (cover + ordnance).
@@ -936,7 +1172,10 @@ export class Sim {
       p.score, p.combo, p.alive ? 1 : 0,
       p.correct, p.wrong, p.bestCombo, p.kills,
     ] as Snapshot['ps'][number])
-    const kindIdx = (k: EnemyKind) => (k === 'RUNNER' ? 0 : k === 'GRUNT' ? 1 : k === 'ELITE' ? 2 : 3)
+    const kindIdx = (k: EnemyKind) => {
+      const idx = ENEMY_KIND_ORDER.indexOf(k)
+      return idx >= 0 ? idx : 1
+    }
     const es = this.enemies.map(e => [
       e.id, kindIdx(e.kind), Math.round(e.x * 100) / 100, Math.round(e.z * 100) / 100,
       e.ti, e.hp, e.maxhp, Math.round(e.y * 10) / 10,

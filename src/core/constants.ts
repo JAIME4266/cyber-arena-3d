@@ -39,6 +39,10 @@ export const THREAT_MAX = 1.5
 export const WAVE2_KILLS = 50
 export const WAVE3_KILLS = 100
 
+/** Forward-facing combat stance: anchored toward south bay, facing -Z battlefield. */
+export const COMBAT_ANCHOR_Z = 46
+export const COMBAT_FACING = Math.PI
+
 /** Fixed simulation timestep (60 Hz). */
 export const TICK = 1 / 60
 
@@ -49,7 +53,7 @@ export const INTERP_DELAY = 0.12
 
 export const FIXED_DT = TICK
 
-export type EnemyKind = 'RUNNER' | 'GRUNT' | 'ELITE' | 'BOSS'
+export type EnemyKind = 'RUNNER' | 'GRUNT' | 'FLANKER' | 'ELITE' | 'BOSS'
 
 export interface KindDef {
   color: number
@@ -62,11 +66,12 @@ export interface KindDef {
   boss: boolean
 }
 
-/** Kind colors: real-world paint — sand, brick, rust, signal red. */
+/** Kind colors: real-world paint — sand, brick, tactical teal, rust, signal red. */
 export const KINDS: Record<EnemyKind, KindDef> = {
-  RUNNER: { color: 0xdfa93b, scale: 0.82, speed: 13, radius: 1.4, value: 80, gun: false, shoot: false, boss: false },
-  GRUNT: { color: 0xc0452f, scale: 1.0, speed: 8.5, radius: 1.8, value: 100, gun: false, shoot: false, boss: false },
-  ELITE: { color: 0xcc5f26, scale: 1.15, speed: 7, radius: 1.9, value: 200, gun: true, shoot: true, boss: false },
+  RUNNER: { color: 0xdfa93b, scale: 0.82, speed: 14.5, radius: 1.4, value: 80, gun: false, shoot: false, boss: false },
+  GRUNT: { color: 0xc0452f, scale: 1.16, speed: 7.4, radius: 2.0, value: 110, gun: false, shoot: false, boss: false },
+  FLANKER: { color: 0x56c2a8, scale: 0.94, speed: 11.4, radius: 1.5, value: 140, gun: true, shoot: false, boss: false },
+  ELITE: { color: 0xcc5f26, scale: 1.15, speed: 7.2, radius: 1.9, value: 200, gun: true, shoot: true, boss: false },
   BOSS: { color: 0xa83524, scale: 2.3, speed: 3.5, radius: 4.5, value: 2000, gun: false, shoot: false, boss: true },
 }
 
@@ -78,7 +83,7 @@ export const OBSTACLES: readonly Obstacle[] = [
   { x: -40, z: 34, hw: 10, hd: 6.5, h: 7 },
   { x: 44, z: 30, hw: 9, hd: 6, h: 8 },
   { x: 0, z: -56, hw: 13, hd: 4.5, h: 9 },
-  { x: 0, z: 56, hw: 13, hd: 4.5, h: 9 },
+  { x: -24, z: 62, hw: 10, hd: 4.5, h: 8 },
 ]
 
 export const BULLET_LIFE = 4

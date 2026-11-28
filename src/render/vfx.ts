@@ -19,6 +19,34 @@ interface Ring {
   life: number
 }
 
+interface Flash {
+  mesh: THREE.Mesh
+  life: number
+  maxLife: number
+  size: number
+}
+
+export type CameraMode = 'standard' | 'wide' | 'focus' | 'overview'
+
+interface CameraPreset {
+  label: string
+  y: number
+  z: number
+  fov: number
+  lookY: number
+  lookAhead: number
+  leadMax: number
+}
+
+export const CAMERA_MODE_ORDER: readonly CameraMode[] = ['standard', 'wide', 'focus', 'overview']
+
+export const CAMERA_MODES: Record<CameraMode, CameraPreset> = {
+  standard: { label: 'STANDARD', y: 19.5, z: 30, fov: 54, lookY: 3.6, lookAhead: 24, leadMax: 4.5 },
+  wide: { label: 'WIDE TACTICAL', y: 25, z: 34, fov: 62, lookY: 3.2, lookAhead: 27, leadMax: 6.0 },
+  focus: { label: 'COMBAT FOCUS', y: 15.5, z: 23, fov: 49, lookY: 4.0, lookAhead: 28, leadMax: 5.0 },
+  overview: { label: 'OVERVIEW', y: 42, z: 33, fov: 58, lookY: 2.0, lookAhead: 35, leadMax: 4.0 },
+}
+
 export interface VfxOptions {
   fxLayer: HTMLElement
   speedlinesEl: HTMLElement
@@ -36,10 +64,20 @@ export class VFX {
   private readonly sparkPool: THREE.Mesh[] = []
   private readonly rings: Ring[] = []
   private readonly ringPool: THREE.Mesh[] = []
+  private readonly flashes: Flash[] = []
+  private readonly flashPool: THREE.Mesh[] = []
   private readonly sparkMats = new Map<number, THREE.MeshBasicMaterial>()
 
   private readonly beam: THREE.Mesh
-  private readonly camBase = new THREE.Vector3(0, 27, 41)
+  private readonly lockRing: THREE.Mesh
+  private readonly camBase = new THREE.Vector3(0, 19.5, 76)
+  private readonly camLook = new THREE.Vector3(0, 3.6, 22)
+  private readonly camLead = new THREE.Vector2(0, 0)
+  private lowerAssist = 0
+  private edgeAssist = 0
+  private pulseT = 0
+  private reticleT = 0
+  cameraMode: CameraMode = 'standard'
   /** Camera trauma (game-feel): shake = trauma², decays in REAL time so it
    * survives hit-stop; offset is summed sines, never per-frame random. */
   private trauma = 0
@@ -75,6 +113,16 @@ export class VFX {
       scene.add(m)
       this.ringPool.push(m)
     }
+    const flashGeo = new THREE.SphereGeometry(1, 10, 8)
+    for (let i = 0; i < 20; i++) {
+      const m = new THREE.Mesh(
+        flashGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
+      )
+      m.visible = false
+      scene.add(m)
+      this.flashPool.push(m)
+    }
 
     this.beam = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 1),
@@ -83,6 +131,14 @@ export class VFX {
     this.beam.visible = false
     this.beam.frustumCulled = false
     scene.add(this.beam)
+
+    this.lockRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.78, 1.0, 24),
+      new THREE.MeshBasicMaterial({ color: 0xf58840, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
+    )
+    this.lockRing.rotation.x = -Math.PI / 2
+    this.lockRing.visible = false
+    scene.add(this.lockRing)
   }
 
   private mat(color: number): THREE.MeshBasicMaterial {
@@ -121,6 +177,19 @@ export class VFX {
     mesh.position.set(x, 0.25, z)
     mesh.visible = true
     this.rings.push({ mesh, life: 0.5 })
+  }
+
+  /** Crisp, localized impact flash that fades fast without obscuring labels. */
+  impactFlash(x: number, y: number, z: number, color: number, size = 1.4, life = 0.12): void {
+    const mesh = this.flashPool.pop()
+    if (!mesh) return
+    const mat = mesh.material as THREE.MeshBasicMaterial
+    mat.color.setHex(color)
+    mat.opacity = 0.85
+    mesh.position.set(x, y, z)
+    mesh.scale.setScalar(size)
+    mesh.visible = true
+    this.flashes.push({ mesh, life, maxLife: life, size })
   }
 
   /** Show the tracer beam from a muzzle to a target for a few frames. */
@@ -168,9 +237,46 @@ export class VFX {
     this.kick = Math.min(1, this.kick + amount)
   }
 
+  cycleCameraMode(): CameraMode {
+    const idx = CAMERA_MODE_ORDER.indexOf(this.cameraMode)
+    this.cameraMode = CAMERA_MODE_ORDER[(idx + 1) % CAMERA_MODE_ORDER.length]!
+    return this.cameraMode
+  }
+
+  cameraModeLabel(): string {
+    return CAMERA_MODES[this.cameraMode].label
+  }
+
+  milestonePulse(): void {
+    this.pulseT = 0.45
+    this.addKick(0.85)
+  }
+
+  setLockReticle(x: number | null, z: number | null, radius = 2, locked = false): void {
+    if (x === null || z === null) {
+      this.lockRing.visible = false
+      return
+    }
+    this.lockRing.visible = true
+    this.lockRing.position.set(x, 0.22, z)
+    const pulse = 1 + Math.sin(this.reticleT * (locked ? 8 : 4)) * (locked ? 0.1 : 0.05)
+    this.lockRing.scale.setScalar((radius + 0.9) * pulse)
+    const mat = this.lockRing.material as THREE.MeshBasicMaterial
+    mat.color.setHex(locked ? 0xf59e0b : 0x38bdf8)
+    mat.opacity = locked ? 0.90 : 0.50
+  }
+
   hitStop = 0
 
-  update(dt: number, vm: ViewModel, focus: { x: number; z: number; y: number }, realDt = dt): void {
+  update(
+    dt: number,
+    vm: ViewModel,
+    focus: { x: number; z: number; y: number },
+    realDt = dt,
+    targetLook?: { x: number; z: number } | null,
+  ): void {
+    this.reticleT += realDt
+    this.pulseT = Math.max(0, this.pulseT - realDt)
     // Sparks
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i]!
@@ -198,18 +304,78 @@ export class VFX {
         this.rings.splice(i, 1)
       }
     }
+    // Impact flashes
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const fl = this.flashes[i]!
+      fl.life -= realDt
+      const p = Math.max(0, fl.life / fl.maxLife)
+      fl.mesh.scale.setScalar(fl.size * (0.4 + p * 0.8))
+      ;(fl.mesh.material as THREE.MeshBasicMaterial).opacity = p * 0.85
+      if (fl.life <= 0) {
+        fl.mesh.visible = false
+        this.flashPool.push(fl.mesh)
+        this.flashes.splice(i, 1)
+      }
+    }
     // Beam
     this.beamT = Math.max(0, this.beamT - dt)
     if (this.beamT <= 0) this.beam.visible = false
 
-    // Camera: follow focus (frame-rate independent easing), combo pull-back,
-    // FOV kick, trauma shake. Trauma decays with REAL dt (not the hit-stop
-    // scaled one) so the camera never freezes off-center.
+    // Camera: active mode preset + automatic threat/lower-side assistance +
+    // target look-ahead + combo pull-back + trauma shake (never switches modes).
+    const preset = CAMERA_MODES[this.cameraMode]
     const combo = Math.min(vm.players[0]?.combo ?? 0, 20)
-    const k = 1 - Math.exp(-5 * dt)
-    this.camBase.x += (focus.x - this.camBase.x) * k
-    this.camBase.y += (27 - combo * 0.12 - this.camBase.y) * k
-    this.camBase.z += (focus.z + 41 - combo * 0.3 - this.camBase.z) * k
+    const k = 1 - Math.exp(-5.5 * realDt)
+
+    // Measure incoming threats across all directions, especially +Z (keyboard-facing) and wide flanks.
+    let threatSumX = 0
+    let threatSumZ = 0
+    let threatW = 0
+    let lowerRaw = 0
+    let edgeRaw = 0
+    for (const e of vm.enemies) {
+      const dx = e.x - focus.x
+      const dz = e.z - focus.z
+      const d = Math.hypot(dx, dz) || 1
+      if (d < 64) {
+        const w = 1 - d / 64
+        threatSumX += (dx / d) * w
+        threatSumZ += (dz / d) * w
+        threatW += w
+        if (dz > 4) lowerRaw = Math.max(lowerRaw, Math.min(1, (dz - 4) / 28) * w * 1.4)
+        if (Math.abs(dx) > 22) edgeRaw = Math.max(edgeRaw, Math.min(1, (Math.abs(dx) - 22) / 28))
+      }
+    }
+    this.lowerAssist += (Math.min(1, lowerRaw) - this.lowerAssist) * (1 - Math.exp(-3.2 * realDt))
+    this.edgeAssist += (Math.min(1, edgeRaw) - this.edgeAssist) * (1 - Math.exp(-2.8 * realDt))
+
+    let leadX = 0
+    let leadZ = 0
+    if (targetLook) {
+      leadX += (targetLook.x - focus.x) * 0.14
+      leadZ += (targetLook.z - focus.z) * 0.14
+    }
+    if (threatW > 0.05) {
+      leadX += (threatSumX / threatW) * 2.2
+      leadZ += (threatSumZ / threatW) * 2.2
+    }
+    leadZ += this.lowerAssist * 3.4
+    const ld = Math.hypot(leadX, leadZ)
+    if (ld > preset.leadMax) {
+      leadX = (leadX / ld) * preset.leadMax
+      leadZ = (leadZ / ld) * preset.leadMax
+    }
+    const leadK = 1 - Math.exp(-4.0 * realDt)
+    this.camLead.x += (leadX - this.camLead.x) * leadK
+    this.camLead.y += (leadZ - this.camLead.y) * leadK
+
+    const pulseAmt = this.pulseT > 0 ? Math.sin((this.pulseT / 0.45) * Math.PI) : 0
+    const targetY = preset.y + this.lowerAssist * 5.2 + this.edgeAssist * 2.4 - combo * 0.1 - pulseAmt * 1.4
+    const targetZ = focus.z + preset.z + this.lowerAssist * 6.0 + this.edgeAssist * 2.2 + this.camLead.y * 0.45 - combo * 0.25
+
+    this.camBase.x += (focus.x + this.camLead.x * 0.65 - this.camBase.x) * k
+    this.camBase.y += (targetY - this.camBase.y) * k
+    this.camBase.z += (targetZ - this.camBase.z) * k
     // Landing-dip spring: critically damped, snaps back to rest.
     this.dipV += (-this.dip * 90 - this.dipV * 12) * realDt
     this.dip += this.dipV * realDt
@@ -228,10 +394,15 @@ export class VFX {
       this.camBase.y - this.dip + oy,
       this.camBase.z,
     )
-    this.camera.fov += (55 + combo * 0.75 + shakeAmt * 5 - this.camera.fov) * k
+    const targetFov = preset.fov + combo * 0.6 + this.lowerAssist * 4.5 + this.edgeAssist * 3.5 + shakeAmt * 4.5 - pulseAmt * 2.5
+    this.camera.fov += (targetFov - this.camera.fov) * k
     this.camera.updateProjectionMatrix()
-    this.camera.lookAt(focus.x, 4 + focus.y * 0.4 - this.dip * 0.4, focus.z)
-    this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1)
+    this.camLook.x += (focus.x + this.camLead.x - this.camLook.x) * k
+    this.camLook.y += (preset.lookY + focus.y * 0.4 - this.dip * 0.4 - this.camLook.y) * k
+    this.camLook.z += (focus.z - preset.lookAhead + this.camLead.y - this.camLook.z) * k
+    this.camera.lookAt(this.camLook)
+    // Gentle camera roll response on lateral look-ahead + trauma shake.
+    this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1) - this.camLead.x * 0.0025
 
     // Speed lines
     this.kick = Math.max(0, this.kick - realDt * 5)
@@ -239,8 +410,14 @@ export class VFX {
     this.speedlinesEl.style.opacity = this.speedlineV.toFixed(2)
   }
 
-  resetCamera(): void {
-    this.camBase.set(0, 27, 41)
+  resetCamera(anchorZ = 46): void {
+    const preset = CAMERA_MODES[this.cameraMode]
+    this.camBase.set(0, preset.y, anchorZ + preset.z)
+    this.camLook.set(0, preset.lookY, anchorZ - preset.lookAhead)
+    this.camLead.set(0, 0)
+    this.lowerAssist = 0
+    this.edgeAssist = 0
+    this.pulseT = 0
     this.trauma = 0
     this.kick = 0
     this.dip = 0
