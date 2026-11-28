@@ -33,6 +33,7 @@ export class Hud {
   private readonly wpmEl: HTMLElement
   private readonly dashFill: HTMLElement
   private readonly targetEl: HTMLElement
+  private readonly tkPlate: HTMLElement
   private readonly bossBar: HTMLElement
   private readonly bossFill: HTMLElement
   private readonly partnerChip: HTMLElement
@@ -168,9 +169,9 @@ export class Hud {
     modeChip.append(this.modeEl, this.seedEl)
 
     // Next-key plate
-    const tk = el('div', 'u p tk-plate')
+    this.tkPlate = el('div', 'u p tk-plate')
     this.targetEl = el('b', '', '-')
-    tk.append(this.targetEl, el('small', '', 'NEXT KEY'))
+    this.tkPlate.append(this.targetEl, el('small', '', 'NEXT KEY'))
 
     // Status line + controls hint
     const bottom = el('div', 'u hud-bottom')
@@ -182,7 +183,7 @@ export class Hud {
     pauseBtn.setAttribute('aria-label', 'Pause')
     pauseBtn.addEventListener('click', cb.onPause)
 
-    this.root.append(tl, tc, tr, this.bossBar, this.comboWrap, meters, st, this.partnerChip, curr, this.camChip, modeChip, tk, bottom, pauseBtn)
+    this.root.append(tl, tc, tr, this.bossBar, this.comboWrap, meters, st, this.partnerChip, curr, this.camChip, modeChip, this.tkPlate, bottom, pauseBtn)
     parent.append(this.root)
   }
 
@@ -238,6 +239,7 @@ export class Hud {
     const target = lock ?? cand ?? vm.enemies[0]
     const ch = target ? (target.seq[target.ti] ?? '-') : '-'
     this.set(this.targetEl, 'tk', ch === ' ' ? '␣' : ch)
+    this.tkPlate.classList.toggle('locked', !!lock)
 
     if (vm.curriculum) {
       const c = vm.curriculum
