@@ -1,27 +1,23 @@
-/* RANGE HOT — UI system.
-   Tokens and rules are defined in DESIGN.md (source of truth).
-   Theme: military live-fire training range. Field-gray placards, stencil
-   signage, safety orange, hazard tape on danger only. No glow, no blur,
-   no neon. */
-
+/* CYBER ARENA 3D — Restrained Cyberpunk Tactical UI.
+   Dark translucent obsidian panels with restrained cyan, amber, and red
+   accents; crisp contrast, zero excessive decoration or oversized borders. */
 
 :root {
-  /* color — see DESIGN.md §4 */
-  --bg-deep: oklch(21% 0.010 155);
-  --bg: oklch(25% 0.012 152);
-  --bg-raise: oklch(29% 0.014 150);
-  --bg-inset: oklch(19% 0.010 155);
-  --line: oklch(42% 0.020 140);
-  --line-soft: oklch(35% 0.016 145);
-  --ink: oklch(90% 0.012 100);
-  --ink-muted: oklch(66% 0.022 115);
-  --ink-faint: oklch(52% 0.018 120);
-  --accent: oklch(68% 0.190 48);
-  --accent-ink: oklch(24% 0.060 48);
-  --hazard: oklch(80% 0.150 95);
-  --danger: oklch(58% 0.200 27);
-  --danger-bright: oklch(64% 0.210 27);
-  --ok: oklch(60% 0.100 145);
+  --bg-deep: #070b11;
+  --bg: rgba(11, 17, 27, 0.82);
+  --bg-raise: rgba(17, 26, 40, 0.90);
+  --bg-inset: rgba(6, 10, 16, 0.92);
+  --line: rgba(56, 189, 248, 0.28);
+  --line-soft: rgba(148, 163, 184, 0.16);
+  --ink: #eaf2fb;
+  --ink-muted: #94a9c2;
+  --ink-faint: #647b96;
+  --accent: #38bdf8;
+  --accent-ink: #06131f;
+  --hazard: #f59e0b;
+  --danger: #ef4444;
+  --danger-bright: #f87171;
+  --ok: #34d399;
   /* type */
   --font-stencil: 'Big Shoulders Stencil Display', 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --font-ui: 'Barlow', system-ui, sans-serif;
@@ -31,13 +27,11 @@
   --t: 120ms;
   --ease: cubic-bezier(0, 0, 0.2, 1);
   /* hazard tape — danger surfaces only */
-  --tape: repeating-linear-gradient(45deg, var(--hazard) 0 10px, #26281f 10px 20px);
-  /* range placard: steel plate + 4 corner rivets (the signature move) */
+  --tape: repeating-linear-gradient(45deg, var(--hazard) 0 10px, #111827 10px 20px);
+  /* tactical corner brackets — restrained cyber-slate frame */
   --placard:
-    radial-gradient(circle at 8px 8px, var(--line) 1.6px, transparent 2.2px),
-    radial-gradient(circle at calc(100% - 8px) 8px, var(--line) 1.6px, transparent 2.2px),
-    radial-gradient(circle at 8px calc(100% - 8px), var(--line) 1.6px, transparent 2.2px),
-    radial-gradient(circle at calc(100% - 8px) calc(100% - 8px), var(--line) 1.6px, transparent 2.2px);
+    linear-gradient(90deg, var(--accent) 0 8px, transparent 8px) top left / 100% 1px no-repeat,
+    linear-gradient(270deg, var(--accent) 0 8px, transparent 8px) top right / 100% 1px no-repeat;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0 }
@@ -46,7 +40,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #1d1f1a;
+  background: var(--bg-deep);
   color: var(--ink);
   font-family: var(--font-ui);
   user-select: none;
@@ -55,13 +49,13 @@ html, body {
 #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
 #app { position: absolute; inset: 0; pointer-events: none; z-index: 10 }
 
-/* ---------- shared placard chrome ---------- */
+/* ---------- shared tactical panel chrome ---------- */
 .p {
   background: var(--placard), var(--bg);
   background-color: var(--bg);
   border: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 5%);
-  padding: 8px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 8px 13px;
   font-family: var(--font-cond);
   font-weight: 600;
   font-size: 12px;
@@ -155,16 +149,89 @@ html, body {
 .curr-stats { font-family: var(--font-data); font-size: 10px; color: var(--ink-muted); line-height: 1.55 }
 .curr-stats b { color: var(--ink); font-weight: 600 }
 
-/* next-key plate — the placard shooters read at a glance */
+/* next-key plate — high-contrast target key readout */
 .tk-plate {
-  bottom: 74px; left: 50%; transform: translateX(-50%);
+  bottom: 72px; left: 50%; transform: translateX(-50%);
   width: 128px; padding: 10px 12px 8px; text-align: center;
+  transition: border-color var(--t) var(--ease);
 }
+.tk-plate.locked { border-color: var(--hazard) }
+.tk-plate.locked b { color: var(--hazard) }
 .tk-plate b {
   font-family: var(--font-stencil); font-weight: 900; font-size: 54px; line-height: .9;
   color: var(--ink); display: block; font-variant-numeric: tabular-nums;
 }
 .tk-plate small { font-family: var(--font-stencil); font-size: 9px; color: var(--ink-muted); letter-spacing: .32em; display: block; margin-top: 5px }
+
+/* ---------- screen-space world target labels ---------- */
+#labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 8 }
+.enemy-label {
+  position: absolute; left: 0; top: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 5px 10px 4px;
+  background: rgba(8, 13, 21, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  will-change: transform;
+  z-index: 2;
+}
+.enemy-label.inactive {
+  opacity: 0.78;
+  border-color: rgba(148, 163, 184, 0.24);
+}
+.enemy-label.cand {
+  opacity: 0.94;
+  border-color: var(--accent);
+}
+.enemy-label.locked {
+  opacity: 1;
+  background: rgba(12, 19, 30, 0.96);
+  border: 1.5px solid var(--hazard);
+  padding: 6px 12px 5px;
+  z-index: 20;
+}
+.enemy-label.boss {
+  border-color: var(--danger);
+  background: rgba(20, 10, 14, 0.92);
+}
+.enemy-label.compact {
+  padding: 2px 7px;
+  opacity: 0.62;
+  gap: 0;
+}
+.enemy-label.compact .el-prog { display: none }
+.el-word {
+  display: flex; align-items: center; justify-content: center; gap: 1px;
+  font-family: var(--font-data); font-weight: 600; font-size: 16px; line-height: 1.1;
+  letter-spacing: .08em; white-space: nowrap;
+}
+.enemy-label.locked .el-word { font-size: 18px }
+.enemy-label.compact .el-word { font-size: 12px }
+.enemy-label.boss .el-word { font-size: 20px }
+.el-word .ch-done { color: var(--ok) }
+.el-word .ch-cur { color: #ffffff; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px }
+.enemy-label.locked .el-word .ch-cur { color: var(--hazard); text-decoration-color: var(--hazard) }
+.el-word .ch-todo { color: rgba(203, 213, 225, 0.78) }
+.el-prog { width: 100%; height: 2px; background: rgba(148, 163, 184, 0.2); overflow: hidden }
+.el-prog i { display: block; height: 100%; width: 0%; background: var(--accent) }
+.enemy-label.locked .el-prog i { background: var(--hazard) }
+
+/* off-screen threat edge indicators */
+.edge-ind {
+  position: absolute; left: 0; top: 0;
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 6px;
+  background: rgba(8, 13, 21, 0.90);
+  border: 1px solid var(--accent);
+  font-family: var(--font-data); font-weight: 600; font-size: 11px; color: var(--ink);
+  will-change: transform;
+  z-index: 18;
+}
+.edge-ind .ei-arrow { font-size: 9px; color: var(--accent); display: inline-block; line-height: 1 }
+.edge-ind.warn { border-color: var(--hazard) }
+.edge-ind.warn .ei-arrow { color: var(--hazard) }
+.edge-ind.danger { border-color: var(--danger); background: rgba(24, 10, 14, 0.92) }
+.edge-ind.danger .ei-arrow { color: var(--danger-bright) }
+.edge-ind.locked { border-color: var(--hazard); box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.35) }
 
 .hud-bottom { bottom: 14px; left: 14px; right: 200px; display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap }
 .hud-bottom .status { color: var(--accent); font-family: var(--font-stencil); letter-spacing: .18em }
@@ -179,27 +246,27 @@ html, body {
 .pause-btn:hover, .pause-btn:focus-visible { color: var(--ink); border-color: var(--ink); outline: none }
 
 /* ---------- screen fx layers ---------- */
-#vig { position: absolute; inset: 0; pointer-events: none; z-index: 5; background: radial-gradient(ellipse at center, transparent 62%, oklch(18% 0.01 155 / 55%) 100%) }
-#dmg { position: absolute; inset: 0; pointer-events: none; z-index: 6; background: radial-gradient(ellipse at center, transparent 40%, oklch(52% 0.19 27 / 55%) 100%); opacity: 0; transition: opacity .5s }
-#sl { position: absolute; inset: 0; pointer-events: none; z-index: 4; opacity: 0; background: repeating-conic-gradient(rgba(240,232,214,0) 0 3deg, rgba(240,232,214,.32) 3.3deg 3.7deg, rgba(240,232,214,0) 4deg 7.2deg); -webkit-mask-image: radial-gradient(circle, transparent 36%, #000 88%); mask-image: radial-gradient(circle, transparent 36%, #000 88%) }
+#vig { position: absolute; inset: 0; pointer-events: none; z-index: 5; background: radial-gradient(ellipse at center, transparent 62%, rgba(5, 9, 15, 0.62) 100%) }
+#dmg { position: absolute; inset: 0; pointer-events: none; z-index: 6; background: radial-gradient(ellipse at center, transparent 40%, rgba(239, 68, 68, 0.45) 100%); opacity: 0; transition: opacity .5s }
+#sl { position: absolute; inset: 0; pointer-events: none; z-index: 4; opacity: 0; background: repeating-conic-gradient(rgba(56,189,248,0) 0 3deg, rgba(56,189,248,.22) 3.3deg 3.7deg, rgba(56,189,248,0) 4deg 7.2deg); -webkit-mask-image: radial-gradient(circle, transparent 36%, #000 88%); mask-image: radial-gradient(circle, transparent 36%, #000 88%) }
 #fx { position: absolute; inset: 0; overflow: hidden; z-index: 15 }
 
-/* floating combat text — small stenciled plates */
+/* floating combat text */
 .ft {
   position: absolute;
   font-family: var(--font-stencil); font-weight: 700; font-size: 16px; letter-spacing: .08em;
-  color: var(--ink); background: oklch(21% 0.012 152 / 88%);
-  border: 1px solid var(--line-soft); padding: 2px 9px;
+  color: var(--ink); background: rgba(8, 13, 21, 0.88);
+  border: 1px solid var(--line); padding: 2px 9px;
   transform: translate(-50%, -50%);
   animation: fl .9s var(--ease) forwards;
 }
 @keyframes fl { to { transform: translate(-50%, -190%); opacity: 0 } }
 
-/* ---------- menu: the range board ---------- */
+/* ---------- menu: cyber tactical board ---------- */
 #menu {
   position: absolute; inset: 0; z-index: 30; pointer-events: auto;
   display: flex; align-items: stretch;
-  background: linear-gradient(90deg, oklch(19% 0.012 150 / 94%) 0%, oklch(19% 0.012 150 / 82%) 36%, oklch(19% 0.012 150 / 0%) 66%);
+  background: linear-gradient(90deg, rgba(7, 11, 17, 0.94) 0%, rgba(7, 11, 17, 0.80) 38%, rgba(7, 11, 17, 0) 68%);
 }
 .menu-board {
   width: min(620px, 100%);
@@ -233,13 +300,13 @@ html, body {
 }
 .btn small { color: var(--ink-muted); font: 500 10px var(--font-cond); letter-spacing: .16em; white-space: nowrap }
 .btn:hover, .btn:focus-visible {
-  background: var(--ink); border-color: var(--ink); color: #22241f; outline: none;
+  background: var(--ink); border-color: var(--ink); color: var(--bg-deep); outline: none;
 }
-.btn:hover small, .btn:focus-visible small { color: #5a5c4e }
+.btn:hover small, .btn:focus-visible small { color: #334155 }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700 }
-.btn.primary small { color: oklch(34% 0.09 48) }
-.btn.primary:hover, .btn.primary:focus-visible { background: var(--ink); border-color: var(--ink); color: #22241f }
-.btn.primary:hover small { color: #5a5c4e }
+.btn.primary small { color: #0b2942 }
+.btn.primary:hover, .btn.primary:focus-visible { background: var(--ink); border-color: var(--ink); color: var(--bg-deep) }
+.btn.primary:hover small { color: #334155 }
 .btn:disabled { opacity: .45; cursor: not-allowed }
 .btn:disabled:hover { background: var(--bg); color: var(--ink); border-color: var(--line) }
 
@@ -250,20 +317,20 @@ html, body {
 .panel-overlay {
   position: absolute; inset: 0; z-index: 40; pointer-events: auto;
   display: flex; align-items: center; justify-content: center;
-  background: oklch(18% 0.010 152 / 78%);
+  background: rgba(5, 9, 15, 0.80);
 }
 .card {
   width: min(620px, 92vw); max-height: 86vh; overflow-y: auto;
   background: var(--placard), var(--bg);
-  background-color: var(--bg);
+  background-color: var(--bg-raise);
   border: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 5%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   border-radius: 2px;
   padding: 26px 30px;
 }
 .card h2 { color: var(--ink); font-family: var(--font-stencil); font-weight: 700; letter-spacing: .12em; font-size: 22px; margin-bottom: 14px }
-.card h3 { color: var(--ink-muted); font-family: var(--font-stencil); font-weight: 400; letter-spacing: .26em; font-size: 12px; margin: 16px 0 6px; text-transform: uppercase }
-.card p, .card li { color: oklch(82% 0.014 105); font-size: 14px; line-height: 1.6 }
+.card h3 { color: var(--accent); font-family: var(--font-stencil); font-weight: 400; letter-spacing: .26em; font-size: 12px; margin: 16px 0 6px; text-transform: uppercase }
+.card p, .card li { color: #cbd5e1; font-size: 14px; line-height: 1.6 }
 .card ul { padding-left: 18px }
 .card .krow { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line-soft); padding: 7px 0; font-size: 13px }
 .card .krow b { color: var(--ink-muted); font-family: var(--font-cond); font-weight: 600; letter-spacing: .14em }
@@ -304,7 +371,7 @@ html, body {
 #gameover {
   position: absolute; inset: 0; z-index: 50; pointer-events: auto;
   display: none; align-items: center; justify-content: center;
-  background: oklch(18% 0.010 152 / 85%);
+  background: rgba(5, 9, 15, 0.86);
 }
 #gameover.show { display: flex }
 .go-box { position: relative; background: var(--placard), var(--bg); background-color: var(--bg); border: 1px solid var(--danger); padding: 30px 36px 28px; text-align: center; min-width: min(400px, 90vw); margin-top: 10px }
@@ -318,7 +385,7 @@ html, body {
 .go-stats b { color: var(--ink); float: right; font-family: var(--font-data); font-weight: 600; font-variant-numeric: tabular-nums }
 .go-box .row-actions { justify-content: center }
 
-#pause { position: absolute; inset: 0; z-index: 50; pointer-events: auto; display: none; align-items: center; justify-content: center; background: oklch(18% 0.010 152 / 82%) }
+#pause { position: absolute; inset: 0; z-index: 50; pointer-events: auto; display: none; align-items: center; justify-content: center; background: rgba(5, 9, 15, 0.84) }
 #pause.show { display: flex }
 
 /* ---------- toasts — placard + square status marker ---------- */
@@ -345,7 +412,7 @@ html, body {
   .meters, .runstats, .curr-panel { display: none }
   .hud-bottom .hint { display: none }
   .tk-plate { bottom: 92px; transform: translateX(-50%) scale(.85) }
-  #menu { background: oklch(19% 0.012 150 / 92%) }
+  #menu { background: rgba(7, 11, 17, 0.94) }
   .menu-board { width: 100% }
 }
 
@@ -364,7 +431,7 @@ html, body {
 
 #hd-gate {
   position: absolute; inset: 0; z-index: 60; display: grid; place-items: center;
-  background: oklch(18% 0.010 152 / 92%); pointer-events: auto;
+  background: rgba(6, 10, 16, 0.94); pointer-events: auto;
 }
 #hd-gate .hd-title { font-family: var(--font-stencil); font-weight: 900; font-size: 20px; letter-spacing: .22em; color: var(--ink); text-align: center }
 #hd-gate .hd-bar { margin: 18px auto 0; width: 260px; height: 10px; background: var(--bg-inset); border: 1px solid var(--line); overflow: hidden }

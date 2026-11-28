@@ -95,6 +95,7 @@ export class Session {
   private jumpQueued = false
   private dashQueued = false
   private lockFeedbackId = -1
+  private manualCandidateId = -1
   private fireFlashT = 0
   private localAng = Math.PI / 2
   private lockLookTarget: { x: number; z: number } | null = null
@@ -115,7 +116,7 @@ export class Session {
 
     cfg.renderer.scene.clear()
     this.world = new World(cfg.renderer.scene)
-    this.labels = new LabelSystem(cfg.renderer.scene)
+    this.labels = new LabelSystem(cfg.fxLayer.parentElement ?? document.body)
     this.vfx = new VFX(cfg.renderer.scene, {
       fxLayer: cfg.fxLayer,
       speedlinesEl: cfg.speedlinesEl,
@@ -201,6 +202,11 @@ export class Session {
       if (!this.paused) this.cycleCamera()
       return
     }
+    if (e.code === 'Backquote' || e.key === 'Enter') {
+      e.preventDefault()
+      if (!this.paused) this.cycleTarget()
+      return
+    }
     if (e.key === 'Escape') {
       this.togglePause()
       return
@@ -210,6 +216,22 @@ export class Session {
     if (this.paused) return
     this.pendingKey = ch
     this.predictFireFeedback(ch)
+  }
+
+  private cycleTarget(): void {
+    const vm = this.lastVM
+    if (!vm || vm.enemies.length <= 1) return
+    // Never switch away from an active typing lock.
+    if (vm.lockId >= 0 || this.lockFeedbackId >= 0) return
+    if (this.sim) {
+      this.manualCandidateId = this.sim.cycleCandidate(this.localId)
+    } else if (this.host) {
+      this.manualCandidateId = this.host.sim.cycleCandidate(this.localId)
+    } else {
+      const idx = vm.enemies.findIndex(e => e.id === (this.manualCandidateId >= 0 ? this.manualCandidateId : (vm.candidateId ?? -1)))
+      this.manualCandidateId = vm.enemies[(idx + 1) % vm.enemies.length]!.id
+    }
+    this.cfg.audio.sfx('ui')
   }
 
   private cycleCamera(): void {
@@ -360,6 +382,8 @@ export class Session {
     this.cfg.audio.setIntensity(Math.min(1, 0.2 + combo / 14))
     this.propFx.update(dt)
     this.vfx.update(dt, vm, vm.players[0] ?? { x: 0, z: 0, y: 0 }, realDt, this.lockLookTarget)
+    const hasBoss = vm.bossMax > 0 && vm.enemies.some(e => e.kind === 'BOSS')
+    this.labels.commit(this.renderer().camera, window.innerWidth, window.innerHeight, hasBoss)
     this.renderer().render()
   }
 
@@ -640,8 +664,12 @@ export class Session {
     }
     const activeLockId = vm.lockId >= 0 ? vm.lockId : this.lockFeedbackId
     const lockedEnemy = activeLockId >= 0 ? vm.enemies.find(e => e.id === activeLockId) : undefined
-    const candidateEnemy = !lockedEnemy && vm.candidateId !== undefined && vm.candidateId >= 0
-      ? vm.enemies.find(e => e.id === vm.candidateId)
+    if (this.manualCandidateId >= 0 && !vm.enemies.some(e => e.id === this.manualCandidateId)) {
+      this.manualCandidateId = -1
+    }
+    const effCandId = this.manualCandidateId >= 0 ? this.manualCandidateId : (vm.candidateId ?? -1)
+    const candidateEnemy = !lockedEnemy && effCandId >= 0
+      ? vm.enemies.find(e => e.id === effCandId)
       : undefined
     const reticleTarget = lockedEnemy ?? candidateEnemy
     this.vfx.setLockReticle(
@@ -700,7 +728,9 @@ export class Session {
     }
 
     // Enemies: add/update/remove — height + flinch now physical.
+    this.labels.beginFrame()
     const seen = new Set<number>()
+    const focusP = vm.players[0] ?? { x: 0, z: 0 }
     for (const e of vm.enemies) {
       seen.add(e.id)
       let view = this.enemies.get(e.id)
@@ -744,11 +774,18 @@ export class Session {
           ? () => this.vfx.sparkBurst(e.x, 0.3, e.z, 0x8a8272, e.kind === 'BOSS' ? 5 : 2, e.kind === 'BOSS' ? 0.38 : 0.2)
           : undefined,
       })
-      this.labels.ensure(e.id, e.kind)
-      this.labels.update(
-        e.id, e.kind, e.seq, e.ti, this.lockFeedbackId === e.id,
-        e.x, this.labels.labelY(e.kind) + e.y, e.z, this.renderer().camera.quaternion,
-      )
+      this.labels.submit({
+        id: e.id,
+        kind: e.kind,
+        seq: e.seq,
+        ti: e.ti,
+        locked: this.lockFeedbackId === e.id,
+        candidate: !lockedEnemy && candidateEnemy?.id === e.id,
+        x: e.x,
+        y: this.labels.labelY(e.kind) + e.y,
+        z: e.z,
+        dist: Math.hypot(e.x - focusP.x, e.z - focusP.z),
+      })
     }
     for (const [id, view] of this.enemies) {
       if (!seen.has(id)) {

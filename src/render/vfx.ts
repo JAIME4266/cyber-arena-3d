@@ -70,8 +70,10 @@ export class VFX {
   private readonly beam: THREE.Mesh
   private readonly lockRing: THREE.Mesh
   private readonly camBase = new THREE.Vector3(0, 27, 41)
+  private readonly camLook = new THREE.Vector3(0, 4, 0)
   private readonly camLead = new THREE.Vector2(0, 0)
   private lowerAssist = 0
+  private edgeAssist = 0
   private pulseT = 0
   private reticleT = 0
   cameraMode: CameraMode = 'standard'
@@ -259,8 +261,8 @@ export class VFX {
     const pulse = 1 + Math.sin(this.reticleT * (locked ? 8 : 4)) * (locked ? 0.1 : 0.05)
     this.lockRing.scale.setScalar((radius + 0.9) * pulse)
     const mat = this.lockRing.material as THREE.MeshBasicMaterial
-    mat.color.setHex(locked ? 0xf58840 : 0xd8c88a)
-    mat.opacity = locked ? 0.88 : 0.42
+    mat.color.setHex(locked ? 0xf59e0b : 0x38bdf8)
+    mat.opacity = locked ? 0.90 : 0.50
   }
 
   hitStop = 0
@@ -324,24 +326,27 @@ export class VFX {
     const combo = Math.min(vm.players[0]?.combo ?? 0, 20)
     const k = 1 - Math.exp(-5.5 * realDt)
 
-    // Measure incoming threats across all directions, especially +Z (keyboard-facing side).
+    // Measure incoming threats across all directions, especially +Z (keyboard-facing) and wide flanks.
     let threatSumX = 0
     let threatSumZ = 0
     let threatW = 0
     let lowerRaw = 0
+    let edgeRaw = 0
     for (const e of vm.enemies) {
       const dx = e.x - focus.x
       const dz = e.z - focus.z
       const d = Math.hypot(dx, dz) || 1
-      if (d < 58) {
-        const w = 1 - d / 58
+      if (d < 64) {
+        const w = 1 - d / 64
         threatSumX += (dx / d) * w
         threatSumZ += (dz / d) * w
         threatW += w
         if (dz > 4) lowerRaw = Math.max(lowerRaw, Math.min(1, (dz - 4) / 28) * w * 1.4)
+        if (Math.abs(dx) > 22) edgeRaw = Math.max(edgeRaw, Math.min(1, (Math.abs(dx) - 22) / 28))
       }
     }
     this.lowerAssist += (Math.min(1, lowerRaw) - this.lowerAssist) * (1 - Math.exp(-3.2 * realDt))
+    this.edgeAssist += (Math.min(1, edgeRaw) - this.edgeAssist) * (1 - Math.exp(-2.8 * realDt))
 
     let leadX = 0
     let leadZ = 0
@@ -364,8 +369,8 @@ export class VFX {
     this.camLead.y += (leadZ - this.camLead.y) * leadK
 
     const pulseAmt = this.pulseT > 0 ? Math.sin((this.pulseT / 0.45) * Math.PI) : 0
-    const targetY = preset.y + this.lowerAssist * 5.2 - combo * 0.1 - pulseAmt * 1.4
-    const targetZ = focus.z + preset.z + this.lowerAssist * 6.0 + this.camLead.y * 0.45 - combo * 0.25
+    const targetY = preset.y + this.lowerAssist * 5.2 + this.edgeAssist * 2.4 - combo * 0.1 - pulseAmt * 1.4
+    const targetZ = focus.z + preset.z + this.lowerAssist * 6.0 + this.edgeAssist * 2.2 + this.camLead.y * 0.45 - combo * 0.25
 
     this.camBase.x += (focus.x + this.camLead.x * 0.65 - this.camBase.x) * k
     this.camBase.y += (targetY - this.camBase.y) * k
@@ -388,14 +393,13 @@ export class VFX {
       this.camBase.y - this.dip + oy,
       this.camBase.z,
     )
-    const targetFov = preset.fov + combo * 0.6 + this.lowerAssist * 4.5 + shakeAmt * 4.5 - pulseAmt * 2.5
+    const targetFov = preset.fov + combo * 0.6 + this.lowerAssist * 4.5 + this.edgeAssist * 3.5 + shakeAmt * 4.5 - pulseAmt * 2.5
     this.camera.fov += (targetFov - this.camera.fov) * k
     this.camera.updateProjectionMatrix()
-    this.camera.lookAt(
-      focus.x + this.camLead.x,
-      preset.lookY + focus.y * 0.4 - this.dip * 0.4,
-      focus.z + this.camLead.y,
-    )
+    this.camLook.x += (focus.x + this.camLead.x - this.camLook.x) * k
+    this.camLook.y += (preset.lookY + focus.y * 0.4 - this.dip * 0.4 - this.camLook.y) * k
+    this.camLook.z += (focus.z + this.camLead.y - this.camLook.z) * k
+    this.camera.lookAt(this.camLook)
     // Gentle camera roll response on lateral look-ahead + trauma shake.
     this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1) - this.camLead.x * 0.0025
 
@@ -408,8 +412,10 @@ export class VFX {
   resetCamera(): void {
     const preset = CAMERA_MODES[this.cameraMode]
     this.camBase.set(0, preset.y, preset.z)
+    this.camLook.set(0, preset.lookY, 0)
     this.camLead.set(0, 0)
     this.lowerAssist = 0
+    this.edgeAssist = 0
     this.pulseT = 0
     this.trauma = 0
     this.kick = 0

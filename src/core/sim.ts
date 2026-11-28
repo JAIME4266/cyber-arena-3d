@@ -215,6 +215,7 @@ export class Sim {
   readonly curriculum = new CurriculumTracker()
   private readonly lockStartedAt = new Map<number, number>()
   private readonly wordDirty = new Set<number>()
+  private readonly preferredIds = new Map<number, number>()
 
   constructor(opts: SimOptions) {
     this.seed = opts.seed
@@ -327,10 +328,23 @@ export class Sim {
     const d = Math.hypot(e.x - p.x, e.z - p.z)
     const threatBoost = (e.windup > 0 ? 18 : 0) + (e.kind === 'ELITE' ? 6 : e.kind === 'RUNNER' ? 4 : e.kind === 'FLANKER' ? 3 : 0)
     const progressBoost = e.ti > 0 ? 8 : 0
+    const preferBoost = this.preferredIds.get(p.id) === e.id ? 26 : 0
     // Slightly prioritize enemies approaching from the lower (+Z) side so they don't slip under the HUD.
     const lowerBias = e.z > p.z + 6 ? 4 : 0
     const partnerLocked = this.players.some(o => o.id !== p.id && o.alive && o.lockId === e.id) ? 14 : 0
-    return d - threatBoost - progressBoost - lowerBias + partnerLocked
+    return d - threatBoost - progressBoost - preferBoost - lowerBias + partnerLocked
+  }
+
+  /** Cycle recommended standby target manually when unlocked (never interrupts an active sequence). */
+  cycleCandidate(pid: number): number {
+    const p = this.players[pid]
+    if (!p || !p.alive || p.lockId >= 0 || this.enemies.length <= 1) return this.bestTargetId(pid)
+    const ordered = [...this.enemies].sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))
+    const cur = this.bestTargetId(pid)
+    const idx = ordered.findIndex(e => e.id === cur)
+    const next = ordered[(idx + 1) % ordered.length]!
+    this.preferredIds.set(pid, next.id)
+    return next.id
   }
 
   /** Recommended primary target id for highlighting before the player starts typing. */
@@ -341,6 +355,9 @@ export class Sim {
       const locked = this.enemies.find(e => e.id === p.lockId)
       if (locked) return locked.id
     }
+    const pref = this.preferredIds.get(pid)
+    if (pref !== undefined && this.enemies.some(e => e.id === pref)) return pref
+    this.preferredIds.delete(pid)
     let best: Enemy | null = null
     let bestScore = Infinity
     for (const e of this.enemies) {

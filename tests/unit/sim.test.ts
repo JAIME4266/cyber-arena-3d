@@ -270,4 +270,17 @@ describe('ai & steering', () => {
     expect(sim.typeKey(0, next.seq[0]!)).toBe('advance')
     expect(sim.players[0]!.lockId).toBe(next.id)
   })
+
+  it('cycles standby candidate only when unlocked', () => {
+    const sim = new Sim({ seed: 'cand-cycle', playerCount: 1 })
+    drive(sim, 5)
+    expect(sim.enemies.length).toBeGreaterThanOrEqual(2)
+    const first = sim.bestTargetId(0)
+    const second = sim.cycleCandidate(0)
+    expect(second).not.toBe(first)
+    // Lock onto first enemy, then cycleCandidate must NOT switch away from active lock.
+    const e0 = sim.enemies[0]!
+    sim.debugTypeAt(0, e0.seq[0]!, e0.id)
+    expect(sim.cycleCandidate(0)).toBe(e0.id)
+  })
 })
