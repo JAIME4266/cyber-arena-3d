@@ -13,7 +13,7 @@
 import { RNG } from './rng'
 import { blastImpulse, stepProps, wakeProp, PROP_MASS } from './physics'
 import {
-  ARENA, BULLET_LIFE, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
+  ARENA, BULLET_LIFE, COMBAT_ANCHOR_Z, COMBAT_FACING, COMBO_SCORE_CAP, COMBO_SCORE_PER, COMBO_SPEED_MAX, COMBO_SPEED_PER,
   COMBO_WINDOW, DASH_CD, DASH_INV, DASH_MULT, DASH_TIME, GRAVITY, INV_TIME, JUMP_VY,
   KEYS, KINDS, LIVES_MAX, OBSTACLES, PICKUP_LIFE, PLAYER_ACCEL, PLAYER_AIR_ACCEL, PLAYER_KNOCK_DECAY,
   PLAYER_PUSH_FORCE, PLAYER_RADIUS, PLAYER_SPEED, LAND_BOUNCE,
@@ -152,14 +152,15 @@ export function movePlayerBody(p: PlayerState, inp: InputState, dt: number, ctx:
   if (wantAng !== null) p.ang = lerpAngle(p.ang, wantAng, Math.min(1, dt * 12))
 }
 
-function makePlayer(id: number, name: string): PlayerState {
+function makePlayer(id: number, name: string, total = 1): PlayerState {
+  const x = total > 1 ? (id === 0 ? -4.5 : 4.5) : 0
   return {
     id, name, alive: true,
-    x: id === 0 ? -4 : 4, z: 0, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0,
-    ang: id === 0 ? Math.PI / 2 : -Math.PI / 2, facing: 0,
+    x, z: COMBAT_ANCHOR_Z, y: 0, vy: 0, vx: 0, vz: 0, kx: 0, kz: 0,
+    ang: COMBAT_FACING, facing: COMBAT_FACING,
     lives: LIVES_MAX, inv: 0, score: 0, kills: 0,
     combo: 0, comboT: 0, bestCombo: 0, correct: 0, wrong: 0,
-    dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: 1, moving: false,
+    dashT: 0, dashCd: 0, dashDirX: 0, dashDirZ: -1, moving: false,
     lockId: -1, slowed: false,
   }
 }
@@ -221,8 +222,8 @@ export class Sim {
     this.seed = opts.seed
     this.rng = new RNG(opts.seed)
     const names = opts.names ?? ['PLAYER 1', 'PLAYER 2']
-    this.players = [makePlayer(0, opts.playerCount > 1 ? names[0] : names[0])]
-    if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1]))
+    this.players = [makePlayer(0, names[0], opts.playerCount)]
+    if (opts.playerCount === 2) this.players.push(makePlayer(1, names[1], opts.playerCount))
     this.rollBubbles()
     this.rollProps()
     // Initial spawn wave happens on first step.
@@ -237,8 +238,9 @@ export class Sim {
     this.props = []
     const centers: Array<[number, number]> = []
     const centerOk = (x: number, z: number): boolean =>
-      Math.hypot(x, z) > 18 && Math.hypot(x, z) < 44
-        && Math.hypot(x + 4, z) > 16 && Math.hypot(x - 4, z) > 16
+      Math.hypot(x, z) > 16 && Math.hypot(x, z) < 46
+        && Math.hypot(x, z - COMBAT_ANCHOR_Z) > 16
+        && Math.hypot(x + 4.5, z - COMBAT_ANCHOR_Z) > 14 && Math.hypot(x - 4.5, z - COMBAT_ANCHOR_Z) > 14
         && !circleHitsObstacle(x, z, 6, OBSTACLES)
         && centers.every(c => Math.hypot(x - c[0], z - c[1]) > 26)
         && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 8)
@@ -274,6 +276,7 @@ export class Sim {
         x = this.rng.range(-1, 1) * 58
         z = this.rng.range(-1, 1) * 58
         ok = Math.hypot(x, z) > 13
+          && Math.hypot(x, z - COMBAT_ANCHOR_Z) > 15
           && !circleHitsObstacle(x, z, r + 2, OBSTACLES)
           && this.bubbles.every(b => Math.hypot(x - b.x, z - b.z) > b.r + 3)
           && this.props.every(p => Math.hypot(x - p.x, z - p.z) > 9)
@@ -299,7 +302,7 @@ export class Sim {
         x = this.rng.range(-1, 1) * (ARENA - 18)
         z = this.rng.range(-1, 1) * (ARENA - 18)
         tries++
-      } while ((Math.hypot(x, z) < 24 || circleHitsObstacle(x, z, r, OBSTACLES)) && tries < 30)
+      } while ((Math.hypot(x, z) < 20 || Math.hypot(x, z - COMBAT_ANCHOR_Z) < 18 || circleHitsObstacle(x, z, r, OBSTACLES)) && tries < 30)
       this.bubbles.push({ x, z, r })
     }
   }
@@ -603,7 +606,7 @@ export class Sim {
         this.enemies.splice(this.enemies.indexOf(e), 1)
         for (const p of this.players) if (p.lockId === e.id) p.lockId = -1
       }
-      const b = this.spawnEnemy('BOSS', 0, -20)
+      const b = this.spawnEnemy('BOSS', 0, -44)
       this.boss = b
       this.bossPhase = 1
       this.events.push({ t: 'boss', hp: b.hp, max: b.maxhp })
@@ -619,16 +622,18 @@ export class Sim {
       z = cz
     } else {
       const er = KINDS[kind].radius
+      const maxSpawnZ = Math.min(COMBAT_ANCHOR_Z - 14, cz - 10)
       let tries = 0
       do {
-        const a = this.rng.next() * Math.PI * 2
-        const r = 48 + this.rng.next() * 28
+        // Forward-facing cinema combat arc: enemies surge in from ahead (-Z) and wide flanks (±X).
+        const a = -Math.PI * 0.90 + this.rng.next() * (Math.PI * 0.80)
+        const r = 52 + this.rng.next() * 44
         x = Math.max(-ARENA + 5, Math.min(ARENA - 5, cx + Math.cos(a) * r))
-        z = Math.max(-ARENA + 5, Math.min(ARENA - 5, cz + Math.sin(a) * r))
+        z = Math.max(-ARENA + 5, Math.min(maxSpawnZ, cz + Math.sin(a) * r))
         tries++
       } while (
         tries < 20 &&
-        (this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 34) ||
+        (this.players.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < 30) ||
           circleHitsObstacle(x, z, er + 1.5, OBSTACLES) ||
           this.props.some(p => p.alive && Math.hypot(p.x - x, p.z - z) < er + p.r + 1.5) ||
           this.enemies.some(o => Math.hypot(o.x - x, o.z - z) < (er + KINDS[o.kind].radius) * 1.6))

@@ -39,6 +39,10 @@ export const THREAT_MAX = 1.5
 export const WAVE2_KILLS = 50
 export const WAVE3_KILLS = 100
 
+/** Forward-facing combat stance: anchored toward south bay, facing -Z battlefield. */
+export const COMBAT_ANCHOR_Z = 46
+export const COMBAT_FACING = Math.PI
+
 /** Fixed simulation timestep (60 Hz). */
 export const TICK = 1 / 60
 
@@ -79,7 +83,7 @@ export const OBSTACLES: readonly Obstacle[] = [
   { x: -40, z: 34, hw: 10, hd: 6.5, h: 7 },
   { x: 44, z: 30, hw: 9, hd: 6, h: 8 },
   { x: 0, z: -56, hw: 13, hd: 4.5, h: 9 },
-  { x: 0, z: 56, hw: 13, hd: 4.5, h: 9 },
+  { x: -24, z: 62, hw: 10, hd: 4.5, h: 8 },
 ]
 
 export const BULLET_LIFE = 4

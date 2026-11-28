@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Sim, pickKind } from '../../src/core/sim'
-import { KEYS, KINDS, OBSTACLES } from '../../src/core/constants'
+import { COMBAT_ANCHOR_Z, COMBAT_FACING, KEYS, KINDS, OBSTACLES } from '../../src/core/constants'
 import { emptyInput } from '../../src/core/types'
 import { RNG } from '../../src/core/rng'
 
@@ -282,5 +282,17 @@ describe('ai & steering', () => {
     const e0 = sim.enemies[0]!
     sim.debugTypeAt(0, e0.seq[0]!, e0.id)
     expect(sim.cycleCandidate(0)).toBe(e0.id)
+  })
+
+  it('positions players in forward-facing combat stance and spawns enemies ahead', () => {
+    const sim = new Sim({ seed: 'forward-stance', playerCount: 1 })
+    const p = sim.players[0]!
+    expect(p.z).toBe(COMBAT_ANCHOR_Z)
+    expect(p.ang).toBeCloseTo(COMBAT_FACING, 5)
+    drive(sim, 3)
+    expect(sim.enemies.length).toBeGreaterThan(0)
+    for (const e of sim.enemies) {
+      expect(e.z).toBeLessThan(COMBAT_ANCHOR_Z)
+    }
   })
 })

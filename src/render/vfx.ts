@@ -34,16 +34,17 @@ interface CameraPreset {
   z: number
   fov: number
   lookY: number
+  lookAhead: number
   leadMax: number
 }
 
 export const CAMERA_MODE_ORDER: readonly CameraMode[] = ['standard', 'wide', 'focus', 'overview']
 
 export const CAMERA_MODES: Record<CameraMode, CameraPreset> = {
-  standard: { label: 'STANDARD', y: 27, z: 41, fov: 55, lookY: 4, leadMax: 4.5 },
-  wide: { label: 'WIDE TACTICAL', y: 31, z: 48, fov: 64, lookY: 3.5, leadMax: 6.0 },
-  focus: { label: 'COMBAT FOCUS', y: 22, z: 33, fov: 50, lookY: 4.4, leadMax: 5.0 },
-  overview: { label: 'OVERVIEW', y: 44, z: 38, fov: 58, lookY: 2.0, leadMax: 4.0 },
+  standard: { label: 'STANDARD', y: 19.5, z: 30, fov: 54, lookY: 3.6, lookAhead: 24, leadMax: 4.5 },
+  wide: { label: 'WIDE TACTICAL', y: 25, z: 34, fov: 62, lookY: 3.2, lookAhead: 27, leadMax: 6.0 },
+  focus: { label: 'COMBAT FOCUS', y: 15.5, z: 23, fov: 49, lookY: 4.0, lookAhead: 28, leadMax: 5.0 },
+  overview: { label: 'OVERVIEW', y: 42, z: 33, fov: 58, lookY: 2.0, lookAhead: 35, leadMax: 4.0 },
 }
 
 export interface VfxOptions {
@@ -69,8 +70,8 @@ export class VFX {
 
   private readonly beam: THREE.Mesh
   private readonly lockRing: THREE.Mesh
-  private readonly camBase = new THREE.Vector3(0, 27, 41)
-  private readonly camLook = new THREE.Vector3(0, 4, 0)
+  private readonly camBase = new THREE.Vector3(0, 19.5, 76)
+  private readonly camLook = new THREE.Vector3(0, 3.6, 22)
   private readonly camLead = new THREE.Vector2(0, 0)
   private lowerAssist = 0
   private edgeAssist = 0
@@ -398,7 +399,7 @@ export class VFX {
     this.camera.updateProjectionMatrix()
     this.camLook.x += (focus.x + this.camLead.x - this.camLook.x) * k
     this.camLook.y += (preset.lookY + focus.y * 0.4 - this.dip * 0.4 - this.camLook.y) * k
-    this.camLook.z += (focus.z + this.camLead.y - this.camLook.z) * k
+    this.camLook.z += (focus.z - preset.lookAhead + this.camLead.y - this.camLook.z) * k
     this.camera.lookAt(this.camLook)
     // Gentle camera roll response on lateral look-ahead + trauma shake.
     this.camera.rotation.z += 0.055 * shakeAmt * Math.sin(this.traumaT * 1.1) - this.camLead.x * 0.0025
@@ -409,10 +410,10 @@ export class VFX {
     this.speedlinesEl.style.opacity = this.speedlineV.toFixed(2)
   }
 
-  resetCamera(): void {
+  resetCamera(anchorZ = 46): void {
     const preset = CAMERA_MODES[this.cameraMode]
-    this.camBase.set(0, preset.y, preset.z)
-    this.camLook.set(0, preset.lookY, 0)
+    this.camBase.set(0, preset.y, anchorZ + preset.z)
+    this.camLook.set(0, preset.lookY, anchorZ - preset.lookAhead)
     this.camLead.set(0, 0)
     this.lowerAssist = 0
     this.edgeAssist = 0

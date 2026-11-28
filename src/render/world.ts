@@ -212,6 +212,30 @@ export class World {
       scene.add(beacons)
     }
 
+    /* ---------- south firing bay tactical pad (combat stance at z = +46) ---------- */
+    {
+      const bayTex = makeTexture(256, (g, s) => {
+        g.strokeStyle = 'rgba(56, 189, 248, 0.78)'
+        g.lineWidth = 8
+        g.strokeRect(22, 22, s - 44, s - 44)
+        g.strokeStyle = 'rgba(245, 158, 11, 0.85)'
+        g.lineWidth = 6
+        g.beginPath()
+        g.moveTo(s * 0.3, s * 0.56)
+        g.lineTo(s * 0.5, s * 0.32)
+        g.lineTo(s * 0.7, s * 0.56)
+        g.stroke()
+      })
+      const bay = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 14),
+        new THREE.MeshBasicMaterial({ map: bayTex, transparent: true, depthWrite: false, opacity: 0.88 }),
+      )
+      bay.rotation.x = -Math.PI / 2
+      bay.position.set(0, 0.09, 46)
+      bay.renderOrder = 2
+      scene.add(bay)
+    }
+
     /* ---------- base backdrop: barracks, hangar, towers, treeline, hills ---------- */
     this.buildBase(scene)
 
